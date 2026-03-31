@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
+
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 
 from tv_automator.automator.browser_control import BrowserController
 from tv_automator.config import Config
 from tv_automator.providers.base import Game
 from tv_automator.providers.mlb import MLBProvider
-from tv_automator.providers.mlb_session import MLBSession
+from tv_automator.providers.mlb_session import MLBSession, StreamInfo
 from tv_automator.scheduler.game_scheduler import GameScheduler
 
 log = logging.getLogger(__name__)
@@ -25,27 +29,37 @@ _browser: BrowserController
 _mlb: MLBProvider
 _session: MLBSession
 _scheduler: GameScheduler
+
 _now_playing_game_id: str | None = None
-_current_stream_url: str | None = None
+_now_playing_feed: str = "HOME"
+_stream_info: StreamInfo | None = None
+_play_lock: asyncio.Lock
+_heartbeat_task: asyncio.Task | None = None
+_watchdog_task: asyncio.Task | None = None
+_expiry_task: asyncio.Task | None = None
+_browser_started_at: float = 0  # monotonic time
+CHROME_RECYCLE_HOURS = 8  # restart Chrome after this many hours of idle
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _browser, _mlb, _session, _scheduler
+    global _config, _browser, _mlb, _session, _scheduler, _play_lock, _watchdog_task
     _config = Config()
     _browser = BrowserController(_config)
     _mlb = MLBProvider()
     _session = MLBSession()
     _scheduler = GameScheduler(_config)
     _scheduler.register_provider(_mlb)
+    _play_lock = asyncio.Lock()
 
+    global _browser_started_at
     try:
         await _browser.start()
+        _browser_started_at = time.monotonic()
         log.info("Browser started")
     except Exception:
         log.exception("Browser failed to start — check DISPLAY / X11")
 
-    # Auto-login via API if credentials are configured
     creds = _config.mlb_credentials
     if creds:
         username, password = creds
@@ -56,18 +70,189 @@ async def lifespan(app: FastAPI):
         else:
             log.error("MLB.TV login failed — check MLB_USERNAME / MLB_PASSWORD")
     else:
-        log.warning("No MLB credentials configured — set MLB_USERNAME and MLB_PASSWORD in .env")
+        log.warning("No MLB credentials — set MLB_USERNAME and MLB_PASSWORD in .env")
 
     await _scheduler.start()
 
+    # Start the watchdog
+    _watchdog_task = asyncio.create_task(_watchdog_loop())
+
     yield
 
+    # Shutdown
+    if _watchdog_task:
+        _watchdog_task.cancel()
+    _stop_heartbeat()
+    _stop_expiry_timer()
     await _scheduler.stop()
     await _session.close()
     await _browser.stop()
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# ── Background tasks ────────────────────────────────────────────
+
+async def _heartbeat_loop() -> None:
+    """Send periodic heartbeats to keep the MLB stream alive."""
+    while True:
+        if not _stream_info or not _stream_info.heartbeat_url:
+            return
+        await asyncio.sleep(_stream_info.heartbeat_interval)
+        ok = await _session.send_heartbeat(_stream_info.heartbeat_url)
+        if ok:
+            log.debug("Heartbeat OK")
+        else:
+            log.warning("Heartbeat failed — stream may drop soon")
+
+
+def _start_heartbeat() -> None:
+    global _heartbeat_task
+    _stop_heartbeat()
+    if _stream_info and _stream_info.heartbeat_url:
+        _heartbeat_task = asyncio.create_task(_heartbeat_loop())
+        log.info("Heartbeat started (every %ds)", _stream_info.heartbeat_interval)
+
+
+def _stop_heartbeat() -> None:
+    global _heartbeat_task
+    if _heartbeat_task and not _heartbeat_task.done():
+        _heartbeat_task.cancel()
+        log.info("Heartbeat stopped")
+    _heartbeat_task = None
+
+
+async def _expiry_refresh_loop() -> None:
+    """Proactively refresh the stream URL before it expires."""
+    while _stream_info and _stream_info.expiration:
+        now = datetime.now(timezone.utc)
+        # Refresh 2 minutes before expiry
+        remaining = (_stream_info.expiration - now).total_seconds() - 120
+        if remaining > 0:
+            log.info("Stream expires in %.0fs — will refresh in %.0fs", remaining + 120, remaining)
+            await asyncio.sleep(remaining)
+        # Time to refresh
+        log.info("Proactively refreshing stream before expiry...")
+        await _do_reconnect()
+        return  # _do_reconnect starts a new expiry timer
+
+
+def _start_expiry_timer() -> None:
+    global _expiry_task
+    _stop_expiry_timer()
+    if _stream_info and _stream_info.expiration:
+        _expiry_task = asyncio.create_task(_expiry_refresh_loop())
+
+
+def _stop_expiry_timer() -> None:
+    global _expiry_task
+    if _expiry_task and not _expiry_task.done():
+        _expiry_task.cancel()
+    _expiry_task = None
+
+
+async def _watchdog_loop() -> None:
+    """Monitor browser and stream health, auto-recover on failure."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            # Check browser health — restart if crashed
+            if not _browser.is_healthy:
+                log.warning("Watchdog: browser unhealthy — restarting...")
+                if await _browser.restart():
+                    _browser_started_at = time.monotonic()
+                    if _now_playing_game_id:
+                        log.info("Watchdog: reconnecting stream after browser restart...")
+                        await _do_reconnect()
+
+            # Chrome memory leak prevention — recycle if idle for too long
+            elif (
+                _browser.is_running
+                and not _now_playing_game_id
+                and _browser_started_at
+                and (time.monotonic() - _browser_started_at) > CHROME_RECYCLE_HOURS * 3600
+            ):
+                log.info("Watchdog: recycling Chrome after %dh idle", CHROME_RECYCLE_HOURS)
+                if await _browser.restart():
+                    _browser_started_at = time.monotonic()
+
+            # Proactively refresh auth before expiry
+            if _session._username and not _session.is_authenticated:
+                log.info("Watchdog: token expiring — refreshing...")
+                await _session.ensure_authenticated()
+
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            log.exception("Watchdog error")
+
+
+# ── Play / reconnect logic ──────────────────────────────────────
+
+async def _do_play(game_id: str, feed: str) -> StreamInfo:
+    """Get a stream and navigate Chrome to the player. Returns StreamInfo."""
+    global _now_playing_game_id, _now_playing_feed, _stream_info
+
+    if not await _session.ensure_authenticated():
+        raise HTTPException(401, "Not authenticated — check MLB_USERNAME / MLB_PASSWORD in .env")
+
+    info = await _session.get_stream_info(game_id, feed_type=feed)
+    if not info:
+        raise HTTPException(502, "Could not get stream URL — game may not be available yet")
+
+    _stream_info = info
+    _now_playing_game_id = game_id
+    _now_playing_feed = feed
+    _start_heartbeat()
+    _start_expiry_timer()
+
+    ok = await _browser.navigate("http://127.0.0.1:5000/player")
+    if not ok:
+        raise HTTPException(503, "Failed to navigate browser to player")
+
+    return info
+
+
+async def _do_reconnect() -> StreamInfo | None:
+    """Get a fresh stream URL for the current game and reload the player."""
+    global _stream_info
+
+    if not _now_playing_game_id:
+        return None
+
+    log.info("Reconnecting stream for game %s (feed=%s)...",
+             _now_playing_game_id, _now_playing_feed)
+
+    _stop_heartbeat()
+    _stop_expiry_timer()
+
+    try:
+        info = await _session.get_stream_info(_now_playing_game_id, _now_playing_feed)
+        if not info:
+            log.error("Reconnect failed — no stream URL")
+            return None
+
+        _stream_info = info
+        _start_heartbeat()
+        _start_expiry_timer()
+
+        await _browser.navigate("http://127.0.0.1:5000/player")
+        log.info("Reconnected successfully")
+        return info
+    except Exception:
+        log.exception("Reconnect failed")
+        return None
+
+
+async def _do_stop() -> None:
+    global _now_playing_game_id, _now_playing_feed, _stream_info
+    _stop_heartbeat()
+    _stop_expiry_timer()
+    await _browser.stop_playback()
+    _now_playing_game_id = None
+    _now_playing_feed = "HOME"
+    _stream_info = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -108,39 +293,41 @@ async def dashboard():
 @app.get("/api/games")
 async def get_games(date: str | None = None):
     target = datetime.fromisoformat(date) if date else datetime.now()
+    # Use scheduler's cache for today, fetch directly for other dates
+    if target.date() == datetime.now().date():
+        games = _scheduler.get_games_for_provider("mlb")
+        if games:
+            return [_game_to_dict(g) for g in games]
     games = await _mlb.get_schedule(target)
     return [_game_to_dict(g) for g in games]
 
 
 @app.post("/api/play/{game_id}")
 async def play_game(game_id: str, date: str | None = None, feed: str = "HOME"):
-    global _now_playing_game_id, _current_stream_url
-
     if not _browser.is_running:
         raise HTTPException(503, "Browser not running — check DISPLAY / X11")
-    if not _session.is_authenticated:
-        if not await _session.ensure_authenticated():
-            raise HTTPException(401, "Not authenticated — check MLB_USERNAME / MLB_PASSWORD in .env")
 
-    stream_url = await _session.get_stream_url(game_id, feed_type=feed.upper())
-    if not stream_url:
-        raise HTTPException(502, "Could not get stream URL — game may not be available yet")
-
-    _current_stream_url = stream_url
-    _now_playing_game_id = game_id
-
-    # Navigate Chrome to the local HLS player
-    ok = await _browser.navigate("http://127.0.0.1:5000/player")
-    return {"success": ok, "feed": feed.upper()}
+    async with _play_lock:
+        _stop_heartbeat()
+        info = await _do_play(game_id, feed.upper())
+        return {"success": True, "feed": feed.upper()}
 
 
 @app.post("/api/stop")
 async def stop_playback():
-    global _now_playing_game_id, _current_stream_url
-    await _browser.stop_playback()
-    _now_playing_game_id = None
-    _current_stream_url = None
+    async with _play_lock:
+        await _do_stop()
     return {"success": True}
+
+
+@app.post("/api/reconnect")
+async def reconnect():
+    """Get a fresh stream URL and reload the player. Called by player on errors."""
+    async with _play_lock:
+        info = await _do_reconnect()
+        if info:
+            return {"success": True, "url": info.url}
+        raise HTTPException(502, "Reconnect failed")
 
 
 @app.get("/api/status")
@@ -149,15 +336,27 @@ async def get_status():
         "now_playing_game_id": _now_playing_game_id,
         "authenticated": _session.is_authenticated,
         "browser_running": _browser.is_running,
+        "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
     }
 
 
 @app.get("/api/stream")
 async def get_stream():
-    """Returns the current stream URL — called by the player page."""
-    if not _current_stream_url:
+    if not _stream_info:
         raise HTTPException(404, "No stream active")
-    return {"url": _current_stream_url}
+    return {"url": _stream_info.url}
+
+
+@app.get("/api/health")
+async def health_check():
+    ok = _browser.is_healthy and _session.is_authenticated
+    return {
+        "healthy": ok,
+        "browser": _browser.is_healthy,
+        "authenticated": _session.is_authenticated,
+        "now_playing": _now_playing_game_id,
+        "heartbeat": _heartbeat_task is not None and not _heartbeat_task.done(),
+    }
 
 
 @app.get("/player", response_class=HTMLResponse)
@@ -165,7 +364,19 @@ async def player_page():
     return _PLAYER_HTML
 
 
-# ── Player HTML ──────────────────────────────────────────────────
+_STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/static/{filename}")
+async def static_file(filename: str):
+    path = _STATIC_DIR / filename
+    if not path.is_file():
+        raise HTTPException(404)
+    media = "application/javascript" if filename.endswith(".js") else "application/octet-stream"
+    return FileResponse(path, media_type=media)
+
+
+# ── Player HTML (with auto-reconnect) ───────────────────────────
 
 _PLAYER_HTML = """\
 <!DOCTYPE html>
@@ -177,49 +388,131 @@ _PLAYER_HTML = """\
   * { margin: 0; padding: 0; }
   body { background: #000; overflow: hidden; }
   video { width: 100vw; height: 100vh; object-fit: contain; }
-  #error { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-           color: #ef4444; font-family: sans-serif; font-size: 1.1rem;
-           background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 8px;
-           display: none; }
+  #status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            font-family: sans-serif; font-size: 1rem;
+            background: rgba(0,0,0,0.85); padding: 10px 24px; border-radius: 8px;
+            display: none; z-index: 10; transition: opacity 0.3s; }
+  .error { color: #ef4444; }
+  .info  { color: #8b92b3; }
 </style>
 </head>
 <body>
 <video id="video" autoplay></video>
-<div id="error"></div>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<div id="status"></div>
+<script src="/static/hls.min.js"></script>
 <script>
-(async function() {
-  const errEl = document.getElementById('error');
-  try {
-    const res = await fetch('/api/stream');
-    if (!res.ok) throw new Error('No stream available');
-    const { url } = await res.json();
-    const video = document.getElementById('video');
+(function() {
+  const video = document.getElementById('video');
+  const statusEl = document.getElementById('status');
+  let hls = null;
+  let retries = 0;
+  let reconnecting = false;
+  const MAX_RETRIES = 5;
+  const RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 60 });
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          errEl.textContent = 'Stream error: ' + data.type;
-          errEl.style.display = '';
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-          else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-        }
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
-      video.play();
-    } else {
-      errEl.textContent = 'HLS not supported in this browser';
-      errEl.style.display = '';
-    }
-  } catch (e) {
-    errEl.textContent = e.message;
-    errEl.style.display = '';
+  function showStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || '';
+    statusEl.style.display = '';
   }
+  function hideStatus() { statusEl.style.display = 'none'; }
+
+  async function loadStream() {
+    try {
+      const res = await fetch('/api/stream');
+      if (!res.ok) { showStatus('No stream available', 'error'); return; }
+      const { url } = await res.json();
+      startPlayer(url);
+    } catch (e) {
+      showStatus('Failed to load stream: ' + e.message, 'error');
+      scheduleReconnect();
+    }
+  }
+
+  function startPlayer(url) {
+    if (hls) { hls.destroy(); hls = null; }
+
+    if (!Hls.isSupported()) {
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play();
+        return;
+      }
+      showStatus('HLS not supported', 'error');
+      return;
+    }
+
+    hls = new Hls({
+      maxBufferLength: 30,
+      maxMaxBufferLength: 120,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 6,
+      enableWorker: true,
+    });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      video.play();
+      retries = 0;
+      hideStatus();
+    });
+
+    hls.on(Hls.Events.ERROR, function(_, data) {
+      if (!data.fatal) return;
+
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        showStatus('Network error \u2014 reconnecting...', 'info');
+        // Try hls.js built-in recovery first
+        hls.startLoad();
+        // If still failing after 10s, do a full reconnect
+        setTimeout(function() {
+          if (hls && hls.media && hls.media.paused) {
+            scheduleReconnect();
+          }
+        }, 10000);
+      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        showStatus('Media error \u2014 recovering...', 'info');
+        hls.recoverMediaError();
+      } else {
+        showStatus('Fatal error \u2014 reconnecting...', 'error');
+        scheduleReconnect();
+      }
+    });
+  }
+
+  async function scheduleReconnect() {
+    if (reconnecting) return;
+    if (retries >= MAX_RETRIES) {
+      showStatus('Stream lost after ' + MAX_RETRIES + ' retries.', 'error');
+      return;
+    }
+    reconnecting = true;
+    retries++;
+    const delay = RETRY_DELAYS[Math.min(retries - 1, RETRY_DELAYS.length - 1)];
+    showStatus('Reconnecting (' + retries + '/' + MAX_RETRIES + ') in ' + (delay/1000) + 's...', 'info');
+    await new Promise(r => setTimeout(r, delay));
+
+    try {
+      showStatus('Getting fresh stream...', 'info');
+      const res = await fetch('/api/reconnect', { method: 'POST' });
+      if (res.ok) {
+        const { url } = await fetch('/api/stream').then(r => r.json());
+        reconnecting = false;
+        startPlayer(url);
+      } else {
+        reconnecting = false;
+        showStatus('Reconnect failed \u2014 retrying...', 'error');
+        scheduleReconnect();
+      }
+    } catch (e) {
+      reconnecting = false;
+      showStatus('Reconnect error: ' + e.message, 'error');
+      scheduleReconnect();
+    }
+  }
+
+  loadStream();
 })();
 </script>
 </body>

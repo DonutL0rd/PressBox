@@ -53,62 +53,69 @@ class BrowserController:
             self._browser = await self._playwright.chromium.launch(**launch_kwargs)
             log.info("Launched Chromium")
 
+        # Monitor for unexpected disconnects
+        self._browser.on("disconnected", lambda: log.error("Browser disconnected unexpectedly"))
+
         log.info("Browser controller ready")
 
     async def stop(self) -> None:
         log.info("Stopping browser controller...")
-        for obj in (self._page, self._browser, self._playwright):
-            if obj is not None:
-                try:
-                    if hasattr(obj, "close"):
-                        await obj.close()
-                    elif hasattr(obj, "stop"):
-                        await obj.stop()
-                except Exception:
-                    pass
-        self._page = None
-        self._browser = None
-        self._playwright = None
+        for obj_name in ("_page", "_browser", "_playwright"):
+            obj = getattr(self, obj_name, None)
+            if obj is None:
+                continue
+            try:
+                if hasattr(obj, "close"):
+                    await obj.close()
+                elif hasattr(obj, "stop"):
+                    await obj.stop()
+            except Exception:
+                pass
+            setattr(self, obj_name, None)
         log.info("Browser controller stopped")
 
     @property
     def is_running(self) -> bool:
         return self._browser is not None and self._browser.is_connected()
 
-    async def navigate(self, url: str) -> bool:
-        """Navigate Chrome to a URL and bring the window to the foreground."""
-        if not self._browser:
-            log.error("Browser not started")
+    @property
+    def is_healthy(self) -> bool:
+        """Check if Chrome is still connected and responsive."""
+        if not self.is_running:
+            return False
+        # If we have a page, check it isn't closed
+        if self._page and self._page.is_closed():
+            return False
+        return True
+
+    async def restart(self) -> bool:
+        """Tear down and relaunch Chrome. Returns True on success."""
+        log.info("Restarting browser...")
+        await self.stop()
+        try:
+            await self.start()
+            log.info("Browser restarted successfully")
+            return True
+        except Exception:
+            log.exception("Browser restart failed")
             return False
 
-        if not self._page or self._page.is_closed():
-            context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
-            self._page = await context.new_page()
-            res = self._config.display.get("resolution", "1920x1080")
-            w, h = (int(x) for x in res.split("x"))
-            await self._page.set_viewport_size({"width": w, "height": h})
+    async def navigate(self, url: str) -> bool:
+        """Navigate Chrome to a URL and bring the window to the foreground."""
+        if not self.is_running:
+            log.error("Browser not running — cannot navigate")
+            return False
 
-        log.info("Navigating to: %s", url[:120])
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await self._page.bring_to_front()
-            try:
-                await self._page.keyboard.press("F11")
-            except Exception:
-                pass
-            # Raise the window via xdotool
-            try:
-                await asyncio.create_subprocess_exec(
-                    "xdotool", "search", "--onlyvisible", "--class", "chrome",
-                    "windowactivate", "--sync",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
+            page = await self._ensure_page()
+            log.info("Navigating to: %s", url[:120])
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await self._raise_window(page)
             return True
         except Exception:
             log.exception("Navigation failed")
+            # Page may be broken — clear it so next navigate creates a fresh one
+            self._page = None
             return False
 
     async def stop_playback(self) -> None:
@@ -125,3 +132,46 @@ class BrowserController:
             url = self._page.url
             return url if url != "about:blank" else None
         return None
+
+    # ── Internals ───────────────────────────────────────────────
+
+    async def _ensure_page(self) -> Page:
+        """Get the active page, creating one if needed."""
+        if self._page and not self._page.is_closed():
+            return self._page
+
+        if not self._browser:
+            raise RuntimeError("Browser not started")
+
+        context = (
+            self._browser.contexts[0]
+            if self._browser.contexts
+            else await self._browser.new_context()
+        )
+        self._page = await context.new_page()
+        res = self._config.display.get("resolution", "1920x1080")
+        w, h = (int(x) for x in res.split("x"))
+        await self._page.set_viewport_size({"width": w, "height": h})
+        return self._page
+
+    @staticmethod
+    async def _raise_window(page: Page) -> None:
+        """Try to bring Chrome to the foreground."""
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+        try:
+            await page.keyboard.press("F11")
+        except Exception:
+            pass
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "xdotool", "search", "--onlyvisible", "--class", "chrome",
+                "windowactivate", "--sync",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except Exception:
+            pass
