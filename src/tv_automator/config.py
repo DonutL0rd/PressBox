@@ -25,10 +25,15 @@ class Config:
         if DEFAULT_CONFIG_PATH.exists():
             self._data = self._load_yaml(DEFAULT_CONFIG_PATH)
 
-        # Layer 2: user config file
+        # Layer 2: user config file (explicit path)
         if config_path and config_path.exists():
             user_cfg = self._load_yaml(config_path)
             self._deep_merge(self._data, user_cfg)
+
+        # Layer 2b: auto-load persisted user config from data dir
+        auto_user_cfg = self.data_dir / "config" / "user.yaml"
+        if auto_user_cfg.exists():
+            self._deep_merge(self._data, self._load_yaml(auto_user_cfg))
 
         # Layer 3: env overrides
         self._apply_env_overrides()
@@ -66,6 +71,10 @@ class Config:
     @property
     def browser_timeout(self) -> int:
         return self.browser.get("timeout", 30)
+
+    @property
+    def cec(self) -> dict[str, Any]:
+        return self.get("cec", {})
 
     @property
     def scheduler(self) -> dict[str, Any]:

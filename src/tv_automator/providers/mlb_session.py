@@ -283,6 +283,14 @@ class MLBSession:
         if not contents:
             return None
 
+        # Prefer VIDEO feeds over AUDIO feeds
+        for item in contents:
+            state = item.get("mediaState") or {}
+            if (item.get("feedType", "").upper() == feed_type.upper()
+                    and state.get("mediaType", "").upper() == "VIDEO"):
+                return item["mediaId"]
+
+        # Fall back to any matching feed type
         for item in contents:
             if item.get("feedType", "").upper() == feed_type.upper():
                 return item["mediaId"]

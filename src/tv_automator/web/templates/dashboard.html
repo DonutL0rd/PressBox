@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TV Automator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d2e;
+      --card: #1e2235;
+      --border: #2d3148;
+      --text: #e8eaf6;
+      --muted: #8b92b3;
+      --accent: #4f7dff;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    header h1 { font-size: 1.3rem; font-weight: 700; white-space: nowrap; }
+
+    #now-playing-bar {
+      flex: 1; font-size: 0.88rem; color: var(--green);
+      font-weight: 600; display: none;
+    }
+
+    .controls {
+      display: flex; align-items: center; gap: 10px;
+      margin-left: auto; flex-wrap: wrap;
+    }
+
+    .date-nav { display: flex; align-items: center; gap: 8px; }
+    .date-nav span { min-width: 220px; text-align: center; font-size: 0.9rem; font-weight: 600; }
+
+    button {
+      background: var(--card); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+      line-height: 1.4; transition: background 0.12s;
+    }
+    button:hover { background: var(--border); }
+
+    .btn-stop { background: var(--red); border-color: #c53030; color: #fff; }
+    .btn-stop:hover { background: #c53030; }
+
+    .btn-feed {
+      padding: 6px 12px; font-size: 0.78rem; font-weight: 600;
+      border-radius: 5px; cursor: pointer; transition: background 0.12s;
+    }
+    .btn-home { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-home:hover { background: #3b6ae8; }
+    .btn-away { background: var(--card); border-color: var(--border); color: var(--text); }
+    .btn-away:hover { background: var(--border); }
+    .btn-feed:disabled { background: var(--border); border-color: var(--border); color: var(--muted); cursor: default; }
+
+    .auth-badge {
+      font-size: 0.78rem; font-weight: 600; padding: 3px 10px;
+      border-radius: 20px; white-space: nowrap;
+    }
+    .auth-ok  { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .auth-no  { background: rgba(239,68,68,0.12); color: var(--red);   border: 1px solid rgba(239,68,68,0.25); }
+
+    main { padding: 24px; max-width: 1280px; margin: 0 auto; }
+
+    #status-msg {
+      text-align: center; color: var(--muted); padding: 60px 24px; font-size: 1rem;
+    }
+
+    #game-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;
+    }
+
+    .game-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 10px;
+      position: relative; transition: border-color 0.15s;
+    }
+    .game-card.live { border-color: var(--green); }
+    .game-card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .game-card.favorite { border-left: 3px solid var(--accent); }
+
+    .status-badge {
+      position: absolute; top: 12px; right: 12px; padding: 2px 9px; border-radius: 20px;
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .badge-live     { background: var(--green); color: #000; }
+    .badge-pre_game { background: var(--yellow); color: #000; }
+    .badge-scheduled { background: var(--border); color: var(--muted); }
+    .badge-final    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .badge-postponed, .badge-cancelled { background: var(--red); color: #fff; }
+    .badge-unknown  { background: var(--border); color: var(--muted); }
+
+    .matchup {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 0 4px; gap: 8px;
+    }
+    .team { flex: 1; text-align: center; }
+    .team-abbr { font-size: 1.9rem; font-weight: 800; line-height: 1; }
+    .team-abbr.fav { color: var(--accent); }
+    .team-name {
+      font-size: 0.68rem; color: var(--muted); margin-top: 3px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .middle-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; }
+    .score-row { display: flex; align-items: center; gap: 10px; }
+    .score-val { font-size: 1.8rem; font-weight: 800; line-height: 1; }
+    .score-sep { color: var(--muted); font-size: 1rem; }
+    .at-sign { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+    .inning-label { font-size: 0.75rem; color: var(--green); font-weight: 600; white-space: nowrap; }
+
+    .pitchers {
+      font-size: 0.72rem; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; }
+    .game-time { font-size: 0.82rem; color: var(--muted); }
+    .feed-btns { display: flex; gap: 6px; }
+    .now-playing-tag { font-size: 0.8rem; color: var(--accent); font-weight: 600; }
+
+    .volume-control {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 10px;
+    }
+    .volume-control input[type=range] {
+      width: 90px; height: 4px; accent-color: var(--accent); cursor: pointer;
+    }
+    .volume-control .vol-pct { font-size: 0.75rem; color: var(--muted); min-width: 28px; text-align: right; }
+    .btn-mute { background: none; border: none; color: var(--muted); font-size: 1rem;
+                padding: 2px 4px; cursor: pointer; line-height: 1; }
+    .btn-mute:hover { color: var(--text); background: none; }
+    .btn-mute.muted { color: var(--red); }
+
+    .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted);
+                font-size: 1rem; padding: 4px 8px; border-radius: 6px; cursor: pointer; line-height: 1; }
+    .btn-icon:hover { color: var(--text); background: var(--card); }
+
+    .autoplay-row {
+      display: flex; align-items: center; gap: 6px;
+      padding-top: 8px; border-top: 1px solid var(--border); margin-top: 2px;
+    }
+    .autoplay-row-label { font-size: 0.72rem; color: var(--muted); flex: 1; }
+    .btn-autoplay {
+      padding: 4px 11px; font-size: 0.75rem; font-weight: 600;
+      border-radius: 5px; cursor: pointer; transition: all 0.12s;
+      background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    }
+    .btn-autoplay:hover { border-color: var(--accent); color: var(--text); }
+    .btn-autoplay.active { background: rgba(79,125,255,0.15); border-color: var(--accent); color: var(--accent); }
+    .badge-autoplay {
+      position: absolute; top: 12px; left: 12px; padding: 2px 8px; border-radius: 20px;
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+      background: rgba(79,125,255,0.2); color: var(--accent); border: 1px solid rgba(79,125,255,0.35);
+    }
+
+    /* ── Settings Modal ────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      z-index: 100; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 28px; max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto;
+    }
+    .modal h2 { font-size: 1.1rem; margin-bottom: 18px; }
+    .modal-section { margin-bottom: 20px; }
+    .modal-section h3 { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px;
+                        text-transform: uppercase; letter-spacing: 0.05em; }
+    .team-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .team-chip {
+      padding: 5px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--border); background: var(--card);
+      color: var(--muted); transition: all 0.12s; user-select: none;
+    }
+    .team-chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .team-chip:hover { border-color: var(--accent); }
+
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-label { font-size: 0.88rem; }
+    .toggle-desc { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .toggle {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: var(--border); border-radius: 12px;
+      transition: background 0.2s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: var(--text); border-radius: 50%; transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider { background: var(--accent); }
+    .toggle input:checked + .slider::before { transform: translateX(20px); }
+
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 8px 20px; }
+    .btn-primary:hover { background: #3b6ae8; }
+
+    /* ── WS indicator ──────────────────────────────── */
+    .ws-dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+      background: var(--border); margin-right: 4px; vertical-align: middle;
+    }
+    .ws-dot.connected { background: var(--green); }
+
+    /* ── Mobile responsive ─────────────────────────── */
+    @media (max-width: 900px) {
+      #game-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    }
+    @media (max-width: 600px) {
+      header { flex-direction: column; align-items: stretch; padding: 10px 12px; gap: 8px; }
+      header h1 { font-size: 1.1rem; }
+      .controls { margin-left: 0; justify-content: center; gap: 6px; }
+      .date-nav span { min-width: auto; font-size: 0.82rem; }
+      #game-grid { grid-template-columns: 1fr; }
+      main { padding: 12px; }
+      .game-card { padding: 14px; }
+      .team-abbr { font-size: 1.4rem; }
+      .score-val { font-size: 1.3rem; }
+      .volume-control input[type=range] { width: 70px; }
+      button { min-height: 36px; padding: 8px 12px; }
+      .btn-feed { min-height: 32px; }
+      .modal { width: 95%; padding: 18px; border-radius: 12px; }
+      #now-playing-bar { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>TV Automator</h1>
+  <div id="now-playing-bar">&#9654; Now playing: <span id="np-name"></span></div>
+  <div class="controls">
+    <div class="volume-control">
+      <button id="mute-btn" class="btn-mute" onclick="toggleMute()" title="Mute">&#128264;</button>
+      <input id="vol-slider" type="range" min="0" max="100" value="50" oninput="setVolume(this.value)">
+      <span id="vol-pct" class="vol-pct">--%</span>
+    </div>
+    <span id="auth-badge" class="auth-badge"></span>
+    <div class="date-nav">
+      <button onclick="changeDate(-1)">&#9664;</button>
+      <span id="date-label"></span>
+      <button onclick="changeDate(1)">&#9654;</button>
+    </div>
+    <button id="today-btn" onclick="goToToday()" style="display:none">Today</button>
+    <button id="stop-btn" class="btn-stop" onclick="stopPlayback()" style="display:none">&#9632; Stop</button>
+    <button id="tv-btn" class="btn-icon" onclick="toggleTV()" title="TV Power" style="display:none">&#9211;</button>
+    <button class="btn-icon" onclick="openSettings()" title="Settings">&#9881;</button>
+    <button onclick="loadGames()"><span class="ws-dot" id="ws-dot"></span>&#8635;</button>
+  </div>
+</header>
+<main>
+  <div id="status-msg">Loading...</div>
+  <div id="game-grid"></div>
+</main>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h2>Settings</h2>
+    <div class="modal-section">
+      <h3>Favorite Teams</h3>
+      <div class="team-chips" id="team-chips"></div>
+    </div>
+    <div class="modal-section">
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Auto-start games</div>
+          <div class="toggle-desc">Automatically play when a favorite team goes live</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="auto-start-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="toggle-row" id="cec-row" style="display:none">
+        <div>
+          <div class="toggle-label">HDMI-CEC TV control</div>
+          <div class="toggle-desc">Power TV on/off with game start/stop</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="cec-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeSettings()">Cancel</button>
+      <button class="btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentDate = new Date();
+  currentDate.setHours(0, 0, 0, 0);
+  let nowPlayingId = null;
+  let refreshTimer = null;
+  let favorites = new Set();
+  let allTeams = [];
+  let ws = null;
+  let wsReconnectTimer = null;
+  let lastGames = [];
+  let autoplayGameId = null;
+  let autoplayFeed = null;
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dateStr(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+
+  function formatDateLabel(d) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const y = new Date(today); y.setDate(today.getDate()-1);
+    const t = new Date(today); t.setDate(today.getDate()+1);
+    let label;
+    if (d.getTime()===today.getTime()) label='Today';
+    else if (d.getTime()===y.getTime()) label='Yesterday';
+    else if (d.getTime()===t.getTime()) label='Tomorrow';
+    else label=d.toLocaleDateString('en-US',{weekday:'long'});
+    return label+' \u2014 '+d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  }
+
+  function changeDate(delta) { currentDate.setDate(currentDate.getDate()+delta); updateDateLabel(); loadGames(); }
+  function goToToday() { currentDate=new Date(); currentDate.setHours(0,0,0,0); updateDateLabel(); loadGames(); }
+  function updateDateLabel() {
+    document.getElementById('date-label').textContent=formatDateLabel(currentDate);
+    const today=new Date(); today.setHours(0,0,0,0);
+    document.getElementById('today-btn').style.display=currentDate.getTime()===today.getTime()?'none':'';
+  }
+
+  // ── Data loading ──────────────────────────────────────────
+  async function loadGames() {
+    clearTimeout(refreshTimer);
+    document.getElementById('game-grid').innerHTML='';
+    document.getElementById('status-msg').textContent='Loading...';
+    document.getElementById('status-msg').style.display='';
+    try {
+      const [gRes,sRes]=await Promise.all([fetch('/api/games?date='+dateStr(currentDate)),fetch('/api/status')]);
+      const games=await gRes.json(), status=await sRes.json();
+      nowPlayingId=status.now_playing_game_id;
+      lastGames=games;
+      updateStatus(games,status);
+      if(!games.length){document.getElementById('status-msg').textContent='No games scheduled.';}
+      else{document.getElementById('status-msg').style.display='none';renderGames(games);}
+    } catch(e){document.getElementById('status-msg').textContent='Error: '+e.message;}
+    // Fallback polling if WS isn't connected
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      refreshTimer=setTimeout(loadGames,30000);
+    }
+  }
+
+  function updateStatus(games,status) {
+    const bar=document.getElementById('now-playing-bar'),stopBtn=document.getElementById('stop-btn');
+    if(nowPlayingId){
+      const g=games.find(x=>x.game_id===nowPlayingId);
+      document.getElementById('np-name').textContent=g?g.display_matchup:nowPlayingId;
+      bar.style.display='';stopBtn.style.display='';
+    } else { bar.style.display='none';stopBtn.style.display='none'; }
+    const badge=document.getElementById('auth-badge');
+    badge.className='auth-badge '+(status.authenticated?'auth-ok':'auth-no');
+    badge.textContent=status.authenticated?'\u2713 Logged in':'\u2717 No auth';
+  }
+
+  function renderGames(games){document.getElementById('game-grid').innerHTML=games.map(gameCardHTML).join('');}
+  function badgeClass(s){return 'badge-'+(s==='pre_game'?'pre_game':s);}
+
+  function gameCardHTML(g) {
+    const isLive=g.status==='live', isPlaying=g.game_id===nowPlayingId;
+    const canWatch=g.is_watchable||g.status==='final';
+    const inning=g.extra&&g.extra.current_inning, inningState=g.extra&&g.extra.inning_state;
+    const inningHTML=(isLive&&inning)?'<div class="inning-label">'+(inningState?inningState+' ':'')+inning+'</div>':'';
+    const isFav = favorites.has(g.away_team.abbreviation) || favorites.has(g.home_team.abbreviation);
+    const awayFav = favorites.has(g.away_team.abbreviation);
+    const homeFav = favorites.has(g.home_team.abbreviation);
+    const isQueued = autoplayGameId === g.game_id;
+    const canQueue = !isLive && !isPlaying && g.status !== 'final';
+
+    let middleHTML;
+    if(g.display_score){
+      middleHTML='<div class="middle-col"><div class="score-row"><span class="score-val">'+g.away_team.score
+        +'</span><span class="score-sep">\u2014</span><span class="score-val">'+g.home_team.score
+        +'</span></div>'+inningHTML+'</div>';
+    } else { middleHTML='<div class="middle-col"><span class="at-sign">@</span></div>'; }
+
+    const pp=[];
+    if(g.extra&&g.extra.away_probable_pitcher) pp.push(g.away_team.abbreviation+': '+g.extra.away_probable_pitcher);
+    if(g.extra&&g.extra.home_probable_pitcher) pp.push(g.home_team.abbreviation+': '+g.extra.home_probable_pitcher);
+    const pitcherHTML=(!g.display_score&&pp.length)?'<div class="pitchers">'+pp.join(' \u00b7 ')+'</div>':'';
+
+    let actionHTML;
+    if(isPlaying){
+      actionHTML='<span class="now-playing-tag">&#9654; Playing</span>';
+    } else if(canWatch){
+      actionHTML='<div class="feed-btns">'
+        +'<button class="btn-feed btn-away" onclick="playGame(\''+g.game_id+'\',\'AWAY\')">Away</button>'
+        +'<button class="btn-feed btn-home" onclick="playGame(\''+g.game_id+'\',\'HOME\')">Home</button>'
+        +'</div>';
+    } else {
+      actionHTML='<div class="feed-btns"><button class="btn-feed" disabled>Not available</button></div>';
+    }
+
+    const autoplayRowHTML = canQueue
+      ? '<div class="autoplay-row">'
+        + '<span class="autoplay-row-label">Auto-play when live:</span>'
+        + '<button class="btn-autoplay'+(isQueued&&autoplayFeed==='AWAY'?' active':'')
+          +'" onclick="toggleAutoplay(\''+g.game_id+'\',\'AWAY\')">Away</button>'
+        + '<button class="btn-autoplay'+(isQueued&&autoplayFeed==='HOME'?' active':'')
+          +'" onclick="toggleAutoplay(\''+g.game_id+'\',\'HOME\')">Home</button>'
+        + '</div>'
+      : '';
+
+    const autoplayBadge = isQueued
+      ? '<span class="badge-autoplay">Auto-play \u2022 ' + autoplayFeed + '</span>'
+      : '';
+
+    const cls=['game-card',isLive?'live':'',isPlaying?'playing':'',isFav?'favorite':''].filter(Boolean).join(' ');
+    return '<div class="'+cls+'">'
+      +'<span class="status-badge '+badgeClass(g.status)+'">'+g.status_label+'</span>'
+      +autoplayBadge
+      +'<div class="matchup">'
+      +'<div class="team"><div class="team-abbr'+(awayFav?' fav':'')+'">'+g.away_team.abbreviation+'</div><div class="team-name">'+g.away_team.name+'</div></div>'
+      +middleHTML
+      +'<div class="team"><div class="team-abbr'+(homeFav?' fav':'')+'">'+g.home_team.abbreviation+'</div><div class="team-name">'+g.home_team.name+'</div></div>'
+      +'</div>'
+      +pitcherHTML
+      +'<div class="card-footer"><span class="game-time">'+g.display_time+'</span>'+actionHTML+'</div>'
+      +autoplayRowHTML
+      +'</div>';
+  }
+
+  async function loadAutoplay() {
+    try {
+      const res = await fetch('/api/autoplay');
+      if (res.ok) {
+        const data = await res.json();
+        autoplayGameId = data.queued ? data.game_id : null;
+        autoplayFeed = data.queued ? data.feed : null;
+      }
+    } catch(e) {}
+  }
+
+  async function toggleAutoplay(gameId, feed) {
+    // If this game+feed is already queued, clear it. Otherwise set it.
+    const clearing = autoplayGameId === gameId && autoplayFeed === feed;
+    try {
+      const res = await fetch('/api/autoplay', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(clearing ? {} : {game_id: gameId, feed: feed})
+      });
+      if (res.ok) {
+        const data = await res.json();
+        autoplayGameId = data.queued ? data.game_id : null;
+        autoplayFeed = data.queued ? data.feed : null;
+        renderGames(lastGames);
+      }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  async function playGame(gameId,feed) {
+    try {
+      const res=await fetch('/api/play/'+gameId+'?date='+dateStr(currentDate)+'&feed='+feed,{method:'POST'});
+      const data=await res.json();
+      if(res.ok&&data.success){nowPlayingId=gameId;loadGames();}
+      else{alert(data.detail||'Playback failed');}
+    } catch(e){alert('Error: '+e.message);}
+  }
+
+  async function stopPlayback(){
+    try{await fetch('/api/stop',{method:'POST'});nowPlayingId=null;loadGames();}
+    catch(e){alert('Error: '+e.message);}
+  }
+
+  // ── Volume control ──────────────────────────────────────────
+  let volTimer = null;
+  let isMuted = false;
+
+  async function loadVolume() {
+    try {
+      const res = await fetch('/api/volume');
+      if (!res.ok) return;
+      const { volume, muted } = await res.json();
+      document.getElementById('vol-slider').value = volume;
+      document.getElementById('vol-pct').textContent = volume + '%';
+      isMuted = muted;
+      updateMuteBtn();
+    } catch(e) {}
+  }
+
+  function setVolume(val) {
+    document.getElementById('vol-pct').textContent = val + '%';
+    clearTimeout(volTimer);
+    volTimer = setTimeout(async function() {
+      try { await fetch('/api/volume?level=' + val, { method: 'POST' }); } catch(e) {}
+    }, 150);
+  }
+
+  async function toggleMute() {
+    isMuted = !isMuted;
+    updateMuteBtn();
+    try { await fetch('/api/volume?mute=' + isMuted, { method: 'POST' }); } catch(e) {}
+  }
+
+  function updateMuteBtn() {
+    const btn = document.getElementById('mute-btn');
+    btn.className = 'btn-mute' + (isMuted ? ' muted' : '');
+    btn.innerHTML = isMuted ? '&#128263;' : '&#128264;';
+  }
+
+  // ── TV Power (CEC) ─────────────────────────────────────────
+  let tvOn = true;
+  async function toggleTV() {
+    tvOn = !tvOn;
+    try {
+      await fetch('/api/cec/' + (tvOn ? 'on' : 'off'), { method: 'POST' });
+    } catch(e) { alert('CEC error: ' + e.message); }
+  }
+
+  async function checkCEC() {
+    try {
+      const res = await fetch('/api/cec/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.available) {
+          document.getElementById('tv-btn').style.display = '';
+          document.getElementById('cec-row').style.display = '';
+        }
+      }
+    } catch(e) {}
+  }
+
+  // ── Settings Modal ─────────────────────────────────────────
+  async function loadTeams() {
+    try {
+      const res = await fetch('/api/teams');
+      if (res.ok) allTeams = await res.json();
+    } catch(e) {}
+  }
+
+  async function loadFavorites() {
+    try {
+      const res = await fetch('/api/favorites');
+      if (res.ok) {
+        const data = await res.json();
+        favorites = new Set(data.teams || []);
+      }
+    } catch(e) {}
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('auto-start-toggle').checked = data.auto_start || false;
+        document.getElementById('cec-toggle').checked = data.cec_enabled || false;
+      }
+    } catch(e) {}
+  }
+
+  function openSettings() {
+    const chips = document.getElementById('team-chips');
+    chips.innerHTML = allTeams.map(function(t) {
+      const sel = favorites.has(t.abbreviation) ? ' selected' : '';
+      return '<span class="team-chip'+sel+'" data-abbr="'+t.abbreviation+'" onclick="toggleTeamChip(this)">'+t.abbreviation+'</span>';
+    }).join('');
+    loadSettings();
+    document.getElementById('settings-modal').classList.add('open');
+  }
+
+  function closeSettings() {
+    document.getElementById('settings-modal').classList.remove('open');
+  }
+
+  function toggleTeamChip(el) {
+    el.classList.toggle('selected');
+  }
+
+  async function saveSettings() {
+    const chips = document.querySelectorAll('.team-chip.selected');
+    const teams = Array.from(chips).map(function(c) { return c.dataset.abbr; });
+    const autoStart = document.getElementById('auto-start-toggle').checked;
+    const cecEnabled = document.getElementById('cec-toggle').checked;
+
+    try {
+      await Promise.all([
+        fetch('/api/favorites', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({teams: teams})
+        }),
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({auto_start: autoStart, cec_enabled: cecEnabled})
+        })
+      ]);
+      favorites = new Set(teams);
+      closeSettings();
+      renderGames(lastGames);
+    } catch(e) { alert('Save failed: ' + e.message); }
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────
+  function connectWS() {
+    if (ws && ws.readyState <= WebSocket.OPEN) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+    ws.onopen = function() {
+      document.getElementById('ws-dot').classList.add('connected');
+      clearTimeout(refreshTimer);
+      clearTimeout(wsReconnectTimer);
+    };
+
+    ws.onmessage = function(evt) {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'games') {
+          const today = new Date(); today.setHours(0,0,0,0);
+          if (currentDate.getTime() === today.getTime()) {
+            lastGames = msg.games;
+            if (!msg.games.length) {
+              document.getElementById('status-msg').textContent = 'No games scheduled.';
+              document.getElementById('status-msg').style.display = '';
+              document.getElementById('game-grid').innerHTML = '';
+            } else {
+              document.getElementById('status-msg').style.display = 'none';
+              renderGames(msg.games);
+            }
+          }
+        } else if (msg.type === 'status') {
+          nowPlayingId = msg.now_playing_game_id;
+          updateStatus(lastGames, msg);
+          renderGames(lastGames);
+        } else if (msg.type === 'autoplay') {
+          autoplayGameId = msg.queued ? msg.game_id : null;
+          autoplayFeed = msg.queued ? msg.feed : null;
+          renderGames(lastGames);
+        }
+      } catch(e) {}
+    };
+
+    ws.onclose = function() {
+      document.getElementById('ws-dot').classList.remove('connected');
+      ws = null;
+      // Reconnect after 5s, fall back to polling
+      wsReconnectTimer = setTimeout(connectWS, 5000);
+      refreshTimer = setTimeout(loadGames, 30000);
+    };
+
+    ws.onerror = function() { ws.close(); };
+  }
+
+  // ── Init ───────────────────────────────────────────────────
+  async function init() {
+    updateDateLabel();
+    await Promise.all([loadTeams(), loadFavorites(), loadAutoplay()]);
+    loadGames();
+    loadVolume();
+    checkCEC();
+    connectWS();
+  }
+  init();
+</script>
+</body>
+</html>

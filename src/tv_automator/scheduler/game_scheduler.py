@@ -34,6 +34,7 @@ class GameScheduler:
         self._poll_task: asyncio.Task | None = None
         self._auto_start_callback: AutoStartCallback | None = None
         self._auto_started_games: set[str] = set()  # game_ids we've already auto-started
+        self._on_refresh: Callable[[], Awaitable[None]] | None = None
 
     # ── Provider management ─────────────────────────────────────
 
@@ -88,6 +89,10 @@ class GameScheduler:
         """Set a callback to be invoked when a favorite team's game goes live."""
         self._auto_start_callback = callback
 
+    def set_on_refresh(self, callback: Callable[[], Awaitable[None]]) -> None:
+        """Set a callback to be invoked after every schedule refresh."""
+        self._on_refresh = callback
+
     async def start(self) -> None:
         """Start the polling loop."""
         log.info("Starting game scheduler (poll interval: %ds)", self._config.poll_interval)
@@ -121,6 +126,11 @@ class GameScheduler:
                 )
             except Exception:
                 log.exception("Failed to refresh %s schedule", name)
+        if self._on_refresh:
+            try:
+                await self._on_refresh()
+            except Exception:
+                log.exception("on_refresh callback failed")
 
     # ── Internal polling ────────────────────────────────────────
 

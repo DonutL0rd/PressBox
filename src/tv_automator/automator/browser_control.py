@@ -22,15 +22,19 @@ class BrowserController:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
+        self._fullscreened: bool = False
 
     async def start(self) -> None:
         log.info("Starting browser controller...")
         self._playwright = await async_playwright().start()
 
+        res = self._config.display.get("resolution", "1920x1080")
         args = list(self._config.chrome_args) + [
             "--no-sandbox",
             "--disable-gpu-sandbox",
             "--start-fullscreen",
+            f"--window-size={res.replace('x', ',')}",
+            "--window-position=0,0",
         ]
 
         launch_kwargs = {
@@ -91,6 +95,7 @@ class BrowserController:
     async def restart(self) -> bool:
         """Tear down and relaunch Chrome. Returns True on success."""
         log.info("Restarting browser...")
+        self._fullscreened = False
         await self.stop()
         try:
             await self.start()
@@ -146,32 +151,38 @@ class BrowserController:
         context = (
             self._browser.contexts[0]
             if self._browser.contexts
-            else await self._browser.new_context()
+            else await self._browser.new_context(no_viewport=True)
         )
         self._page = await context.new_page()
-        res = self._config.display.get("resolution", "1920x1080")
-        w, h = (int(x) for x in res.split("x"))
-        await self._page.set_viewport_size({"width": w, "height": h})
+        self._page.on("console", lambda msg: log.info("BROWSER: [%s] %s", msg.type, msg.text))
+        self._page.on("pageerror", lambda exc: log.error("BROWSER PAGE ERROR: %s", exc))
         return self._page
 
-    @staticmethod
-    async def _raise_window(page: Page) -> None:
-        """Try to bring Chrome to the foreground."""
+    async def _raise_window(self, page: Page) -> None:
+        """Try to bring Chrome to the foreground and make it fullscreen."""
         try:
             await page.bring_to_front()
         except Exception:
             pass
+        # Use CDP to set the window to fullscreen
+        if not self._fullscreened:
+            try:
+                cdp = await page.context.new_cdp_session(page)
+                result = await cdp.send("Browser.getWindowForTarget")
+                window_id = result["windowId"]
+                await cdp.send("Browser.setWindowBounds", {
+                    "windowId": window_id,
+                    "bounds": {"windowState": "fullscreen"},
+                })
+                self._fullscreened = True
+                log.info("Set window to fullscreen via CDP")
+            except Exception:
+                log.exception("CDP fullscreen failed")
+        # Fallback: JS Fullscreen API — Playwright bypasses the user-gesture requirement
         try:
-            await page.keyboard.press("F11")
-        except Exception:
-            pass
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "xdotool", "search", "--onlyvisible", "--class", "chrome",
-                "windowactivate", "--sync",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+            await page.evaluate(
+                "document.fullscreenElement || document.documentElement.requestFullscreen().catch(()=>{})"
             )
-            await asyncio.wait_for(proc.wait(), timeout=5)
         except Exception:
             pass
+

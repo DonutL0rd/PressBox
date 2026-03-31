@@ -3,29 +3,44 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from urllib.parse import urljoin
+
+import httpx
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, FileResponse, Response
 
 from tv_automator.automator.browser_control import BrowserController
+from tv_automator.automator.cec_control import CECController
 from tv_automator.config import Config
-from tv_automator.providers.base import Game
-from tv_automator.providers.mlb import MLBProvider
+from tv_automator.providers.base import Game, GameStatus, StreamingProvider
+from tv_automator.providers.mlb import MLBProvider, MLB_TEAMS
 from tv_automator.providers.mlb_session import MLBSession, StreamInfo
 from tv_automator.scheduler.game_scheduler import GameScheduler
 
 log = logging.getLogger(__name__)
 
+# ── Templates ───────────────────────────────────────────────────
+_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_PLAYER_HTML = (_TEMPLATE_DIR / "player.html").read_text()
+_DASHBOARD_HTML = (_TEMPLATE_DIR / "dashboard.html").read_text()
+_SCREENSAVER_HTML = (_TEMPLATE_DIR / "screensaver.html").read_text()
+
 # ── App state ────────────────────────────────────────────────────
 
 _config: Config
 _browser: BrowserController
+_cec: CECController
 _mlb: MLBProvider
 _session: MLBSession
 _scheduler: GameScheduler
@@ -33,6 +48,7 @@ _scheduler: GameScheduler
 _now_playing_game_id: str | None = None
 _now_playing_feed: str = "HOME"
 _stream_info: StreamInfo | None = None
+_autoplay_queue: dict | None = None  # {game_id, feed, display_matchup, display_time}
 _play_lock: asyncio.Lock
 _heartbeat_task: asyncio.Task | None = None
 _watchdog_task: asyncio.Task | None = None
@@ -40,16 +56,22 @@ _expiry_task: asyncio.Task | None = None
 _browser_started_at: float = 0  # monotonic time
 CHROME_RECYCLE_HOURS = 8  # restart Chrome after this many hours of idle
 
+# WebSocket clients
+_ws_clients: set[WebSocket] = set()
+_last_games_hash: str = ""
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _browser, _mlb, _session, _scheduler, _play_lock, _watchdog_task
+    global _config, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _watchdog_task
     _config = Config()
     _browser = BrowserController(_config)
+    _cec = CECController(enabled=_config.cec.get("enabled", False))
     _mlb = MLBProvider()
     _session = MLBSession()
     _scheduler = GameScheduler(_config)
     _scheduler.register_provider(_mlb)
+    _scheduler.set_on_refresh(_on_schedule_refresh)
     _play_lock = asyncio.Lock()
 
     global _browser_started_at
@@ -72,10 +94,17 @@ async def lifespan(app: FastAPI):
     else:
         log.warning("No MLB credentials — set MLB_USERNAME and MLB_PASSWORD in .env")
 
+    # Register auto-start callback
+    _scheduler.set_auto_start_callback(_auto_start_game)
+
     await _scheduler.start()
 
     # Start the watchdog
     _watchdog_task = asyncio.create_task(_watchdog_loop())
+
+    # Navigate to screensaver on startup
+    if _browser.is_running:
+        await _browser.navigate("http://127.0.0.1:5000/screensaver")
 
     yield
 
@@ -154,6 +183,7 @@ def _stop_expiry_timer() -> None:
 
 async def _watchdog_loop() -> None:
     """Monitor browser and stream health, auto-recover on failure."""
+    global _browser_started_at
     while True:
         await asyncio.sleep(30)
         try:
@@ -165,6 +195,8 @@ async def _watchdog_loop() -> None:
                     if _now_playing_game_id:
                         log.info("Watchdog: reconnecting stream after browser restart...")
                         await _do_reconnect()
+                    else:
+                        await _browser.navigate("http://127.0.0.1:5000/screensaver")
 
             # Chrome memory leak prevention — recycle if idle for too long
             elif (
@@ -176,6 +208,7 @@ async def _watchdog_loop() -> None:
                 log.info("Watchdog: recycling Chrome after %dh idle", CHROME_RECYCLE_HOURS)
                 if await _browser.restart():
                     _browser_started_at = time.monotonic()
+                    await _browser.navigate("http://127.0.0.1:5000/screensaver")
 
             # Proactively refresh auth before expiry
             if _session._username and not _session.is_authenticated:
@@ -186,6 +219,101 @@ async def _watchdog_loop() -> None:
             return
         except Exception:
             log.exception("Watchdog error")
+
+
+# ── Auto-start callback ──────────────────────────────────────
+
+async def _auto_start_game(provider: StreamingProvider, game: Game) -> None:
+    """Called by the scheduler when a favorite team's game goes live."""
+    async with _play_lock:
+        if _now_playing_game_id:
+            log.info("Auto-start skipped — already playing %s", _now_playing_game_id)
+            return
+
+        # Determine feed: use the favorite team's feed
+        fav_teams = {t.upper() for t in _config.favorite_teams}
+        if game.home_team.abbreviation.upper() in fav_teams:
+            feed = "HOME"
+        elif game.away_team.abbreviation.upper() in fav_teams:
+            feed = "AWAY"
+        else:
+            feed = "HOME"
+
+        log.info("Auto-starting: %s (feed=%s)", game.display_matchup, feed)
+        try:
+            await _do_play(game.game_id, feed)
+        except Exception:
+            log.exception("Auto-start failed for %s", game.game_id)
+
+
+# ── WebSocket broadcast ──────────────────────────────────────
+
+async def _broadcast(message: dict) -> None:
+    """Send a message to all connected WebSocket clients."""
+    if not _ws_clients:
+        return
+    data = json.dumps(message)
+    dead: list[WebSocket] = []
+    for client in _ws_clients:
+        try:
+            await client.send_text(data)
+        except Exception:
+            dead.append(client)
+    for client in dead:
+        _ws_clients.discard(client)
+
+
+async def _broadcast_status() -> None:
+    """Broadcast current playback status to all WS clients."""
+    await _broadcast({
+        "type": "status",
+        "now_playing_game_id": _now_playing_game_id,
+        "authenticated": _session.is_authenticated,
+        "browser_running": _browser.is_running,
+        "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
+    })
+
+
+async def _broadcast_autoplay_state() -> None:
+    """Broadcast current autoplay queue state to all WS clients."""
+    if _autoplay_queue:
+        await _broadcast({"type": "autoplay", "queued": True, **_autoplay_queue})
+    else:
+        await _broadcast({"type": "autoplay", "queued": False, "game_id": None})
+
+
+async def _auto_start_queued(queue_entry: dict) -> None:
+    """Auto-start a specifically queued game once it goes live."""
+    async with _play_lock:
+        if _now_playing_game_id:
+            log.info("Queued auto-start skipped — already playing %s", _now_playing_game_id)
+            return
+        try:
+            await _do_play(queue_entry["game_id"], queue_entry.get("feed", "HOME"))
+        except Exception:
+            log.exception("Queued auto-start failed for %s", queue_entry["game_id"])
+
+
+async def _on_schedule_refresh() -> None:
+    """Called after every scheduler refresh — broadcast if games changed."""
+    global _last_games_hash, _autoplay_queue
+    games = _scheduler.get_games_for_provider("mlb")
+
+    # Check if a specifically queued game has gone live
+    if _autoplay_queue and not _now_playing_game_id:
+        queued_game = _scheduler.get_game_by_id(_autoplay_queue["game_id"])
+        if queued_game and queued_game.status == GameStatus.LIVE:
+            log.info("Queued game went live: %s — auto-starting", queued_game.display_matchup)
+            q = _autoplay_queue
+            _autoplay_queue = None
+            asyncio.create_task(_auto_start_queued(q))
+            await _broadcast_autoplay_state()
+
+    game_dicts = [_game_to_dict(g) for g in games]
+    h = hashlib.md5(json.dumps(game_dicts, default=str).encode()).hexdigest()
+    if h != _last_games_hash:
+        _last_games_hash = h
+        await _broadcast({"type": "games", "games": game_dicts})
 
 
 # ── Play / reconnect logic ──────────────────────────────────────
@@ -207,10 +335,16 @@ async def _do_play(game_id: str, feed: str) -> StreamInfo:
     _start_heartbeat()
     _start_expiry_timer()
 
+    # CEC: power on TV
+    if _cec.enabled:
+        await _cec.power_on()
+        await _cec.set_active_source()
+
     ok = await _browser.navigate("http://127.0.0.1:5000/player")
     if not ok:
         raise HTTPException(503, "Failed to navigate browser to player")
 
+    await _broadcast_status()
     return info
 
 
@@ -249,10 +383,19 @@ async def _do_stop() -> None:
     global _now_playing_game_id, _now_playing_feed, _stream_info
     _stop_heartbeat()
     _stop_expiry_timer()
-    await _browser.stop_playback()
     _now_playing_game_id = None
     _now_playing_feed = "HOME"
     _stream_info = None
+
+    # Navigate to screensaver instead of blank
+    if _browser.is_running:
+        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+
+    # CEC: power off TV
+    if _cec.enabled and _config.cec.get("power_off_on_stop", True):
+        await _cec.power_off()
+
+    await _broadcast_status()
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -344,8 +487,201 @@ async def get_status():
 async def get_stream():
     if not _stream_info:
         raise HTTPException(404, "No stream active")
-    return {"url": _stream_info.url}
+    # Return proxied URL to avoid CORS issues
+    return {"url": "/hls/master.m3u8"}
 
+
+@app.get("/hls/{path:path}")
+async def hls_proxy(path: str):
+    """Proxy HLS requests to MLB CDN to avoid CORS blocks in the browser."""
+    if not _stream_info:
+        raise HTTPException(404, "No stream active")
+
+    # Build the upstream URL: master.m3u8 → the stream URL itself,
+    # anything else → relative to the stream base URL
+    stream_url = _stream_info.url
+    base_url = stream_url.rsplit("/", 1)[0] + "/"
+
+    if path == "master.m3u8":
+        upstream = stream_url
+    else:
+        upstream = urljoin(base_url, path)
+
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        try:
+            resp = await client.get(upstream)
+        except Exception:
+            log.exception("HLS proxy fetch failed: %s", path)
+            raise HTTPException(502, "Upstream fetch failed")
+
+    if resp.status_code >= 400:
+        raise HTTPException(resp.status_code, "Upstream error")
+
+    content = resp.content
+    ct = resp.headers.get("content-type", "application/octet-stream")
+
+    # Rewrite .m3u8 playlists so relative URLs also go through our proxy
+    if path.endswith(".m3u8") or "mpegurl" in ct:
+        text = content.decode()
+        rewritten_lines = []
+        for line in text.splitlines():
+            if line and not line.startswith("#"):
+                # Relative segment/playlist URL → proxy through /hls/
+                rewritten_lines.append("/hls/" + line)
+            else:
+                # Rewrite key URIs too
+                if 'URI="' in line and not 'URI="http' in line:
+                    line = line.replace('URI="', 'URI="/hls/')
+                rewritten_lines.append(line)
+        content = "\n".join(rewritten_lines).encode()
+        ct = "application/vnd.apple.mpegurl"
+
+    return Response(content=content, media_type=ct)
+
+
+# ── Volume ──────────────────────────────────────────────────────
+
+@app.get("/api/volume")
+async def get_volume():
+    """Get current system volume (0-100) and mute state."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "get-sink-volume", "@DEFAULT_SINK@",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        m = re.search(r"(\d+)%", stdout.decode())
+        volume = int(m.group(1)) if m else 0
+
+        proc2 = await asyncio.create_subprocess_exec(
+            "pactl", "get-sink-mute", "@DEFAULT_SINK@",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout2, _ = await proc2.communicate()
+        muted = "yes" in stdout2.decode().lower()
+
+        return {"volume": volume, "muted": muted}
+    except Exception:
+        log.exception("Failed to get volume")
+        raise HTTPException(500, "Volume control unavailable")
+
+
+@app.post("/api/volume")
+async def set_volume(level: int | None = None, mute: bool | None = None):
+    """Set system volume (0-100) and/or mute state."""
+    try:
+        if level is not None:
+            level = max(0, min(100, level))
+            proc = await asyncio.create_subprocess_exec(
+                "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+        if mute is not None:
+            proc = await asyncio.create_subprocess_exec(
+                "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if mute else "0",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+        return await get_volume()
+    except Exception:
+        log.exception("Failed to set volume")
+        raise HTTPException(500, "Volume control unavailable")
+
+
+# ── Favorites & Settings ────────────────────────────────────────
+
+@app.get("/api/teams")
+async def get_teams():
+    """Return all MLB teams."""
+    return MLB_TEAMS
+
+
+@app.get("/api/favorites")
+async def get_favorites():
+    return {"teams": _config.favorite_teams}
+
+
+@app.post("/api/favorites")
+async def set_favorites(body: dict):
+    teams = body.get("teams", [])
+    _config.update_nested("providers", "mlb", "favorite_teams", value=teams)
+    _config.save_user_config()
+    log.info("Favorites updated: %s", teams)
+    return {"teams": teams}
+
+
+@app.get("/api/settings")
+async def get_settings():
+    return {
+        "auto_start": _config.auto_start,
+        "cec_enabled": _config.cec.get("enabled", False),
+    }
+
+
+@app.get("/api/autoplay")
+async def get_autoplay():
+    """Get the currently queued auto-play game."""
+    if not _autoplay_queue:
+        return {"queued": False, "game_id": None, "feed": None}
+    return {"queued": True, **_autoplay_queue}
+
+
+@app.post("/api/autoplay")
+async def set_autoplay(body: dict):
+    """Queue a specific game to auto-play when it goes live. Send {} or {game_id: null} to clear."""
+    global _autoplay_queue
+    game_id = body.get("game_id")
+    if not game_id:
+        _autoplay_queue = None
+        await _broadcast_autoplay_state()
+        return {"queued": False}
+    feed = body.get("feed", "HOME").upper()
+    game = _scheduler.get_game_by_id(game_id)
+    _autoplay_queue = {
+        "game_id": game_id,
+        "feed": feed,
+        "display_matchup": game.display_matchup if game else game_id,
+        "display_time": game.display_time if game else "",
+    }
+    await _broadcast_autoplay_state()
+    return {"queued": True, **_autoplay_queue}
+
+
+@app.post("/api/settings")
+async def update_settings(body: dict):
+    if "auto_start" in body:
+        _config.update_nested("providers", "mlb", "auto_start", value=body["auto_start"])
+    if "cec_enabled" in body:
+        _config.update_nested("cec", "enabled", value=body["cec_enabled"])
+        _cec._enabled = body["cec_enabled"]
+    _config.save_user_config()
+    log.info("Settings updated: %s", body)
+    return await get_settings()
+
+
+# ── CEC ─────────────────────────────────────────────────────────
+
+@app.get("/api/cec/status")
+async def cec_status():
+    available = await _cec.is_available()
+    return {"available": available, "enabled": _cec.enabled}
+
+
+@app.post("/api/cec/{action}")
+async def cec_action(action: str):
+    if action == "on":
+        ok = await _cec.power_on()
+        if ok:
+            await _cec.set_active_source()
+    elif action == "off":
+        ok = await _cec.power_off()
+    else:
+        raise HTTPException(400, "Invalid action — use 'on' or 'off'")
+    return {"success": ok}
+
+
+# ── Health ──────────────────────────────────────────────────────
 
 @app.get("/api/health")
 async def health_check():
@@ -359,9 +695,49 @@ async def health_check():
     }
 
 
+# ── WebSocket ───────────────────────────────────────────────────
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    try:
+        # Send initial state
+        games = _scheduler.get_games_for_provider("mlb")
+        await websocket.send_json({
+            "type": "games",
+            "games": [_game_to_dict(g) for g in games],
+        })
+        await websocket.send_json({
+            "type": "status",
+            "now_playing_game_id": _now_playing_game_id,
+            "authenticated": _session.is_authenticated,
+            "browser_running": _browser.is_running,
+            "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
+        })
+        if _autoplay_queue:
+            await websocket.send_json({"type": "autoplay", "queued": True, **_autoplay_queue})
+        else:
+            await websocket.send_json({"type": "autoplay", "queued": False, "game_id": None})
+        # Keep alive — wait for client disconnect
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_clients.discard(websocket)
+
+
+# ── Pages ───────────────────────────────────────────────────────
+
 @app.get("/player", response_class=HTMLResponse)
 async def player_page():
     return _PLAYER_HTML
+
+
+@app.get("/screensaver", response_class=HTMLResponse)
+async def screensaver_page():
+    return _SCREENSAVER_HTML
 
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -374,433 +750,3 @@ async def static_file(filename: str):
         raise HTTPException(404)
     media = "application/javascript" if filename.endswith(".js") else "application/octet-stream"
     return FileResponse(path, media_type=media)
-
-
-# ── Player HTML (with auto-reconnect) ───────────────────────────
-
-_PLAYER_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>TV Automator Player</title>
-<style>
-  * { margin: 0; padding: 0; }
-  body { background: #000; overflow: hidden; }
-  video { width: 100vw; height: 100vh; object-fit: contain; }
-  #status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            font-family: sans-serif; font-size: 1rem;
-            background: rgba(0,0,0,0.85); padding: 10px 24px; border-radius: 8px;
-            display: none; z-index: 10; transition: opacity 0.3s; }
-  .error { color: #ef4444; }
-  .info  { color: #8b92b3; }
-</style>
-</head>
-<body>
-<video id="video" autoplay></video>
-<div id="status"></div>
-<script src="/static/hls.min.js"></script>
-<script>
-(function() {
-  const video = document.getElementById('video');
-  const statusEl = document.getElementById('status');
-  let hls = null;
-  let retries = 0;
-  let reconnecting = false;
-  const MAX_RETRIES = 5;
-  const RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
-
-  function showStatus(msg, cls) {
-    statusEl.textContent = msg;
-    statusEl.className = cls || '';
-    statusEl.style.display = '';
-  }
-  function hideStatus() { statusEl.style.display = 'none'; }
-
-  async function loadStream() {
-    try {
-      const res = await fetch('/api/stream');
-      if (!res.ok) { showStatus('No stream available', 'error'); return; }
-      const { url } = await res.json();
-      startPlayer(url);
-    } catch (e) {
-      showStatus('Failed to load stream: ' + e.message, 'error');
-      scheduleReconnect();
-    }
-  }
-
-  function startPlayer(url) {
-    if (hls) { hls.destroy(); hls = null; }
-
-    if (!Hls.isSupported()) {
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        video.play();
-        return;
-      }
-      showStatus('HLS not supported', 'error');
-      return;
-    }
-
-    hls = new Hls({
-      maxBufferLength: 30,
-      maxMaxBufferLength: 120,
-      liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 6,
-      enableWorker: true,
-    });
-    hls.loadSource(url);
-    hls.attachMedia(video);
-
-    hls.on(Hls.Events.MANIFEST_PARSED, function() {
-      video.play();
-      retries = 0;
-      hideStatus();
-    });
-
-    hls.on(Hls.Events.ERROR, function(_, data) {
-      if (!data.fatal) return;
-
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-        showStatus('Network error \u2014 reconnecting...', 'info');
-        // Try hls.js built-in recovery first
-        hls.startLoad();
-        // If still failing after 10s, do a full reconnect
-        setTimeout(function() {
-          if (hls && hls.media && hls.media.paused) {
-            scheduleReconnect();
-          }
-        }, 10000);
-      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        showStatus('Media error \u2014 recovering...', 'info');
-        hls.recoverMediaError();
-      } else {
-        showStatus('Fatal error \u2014 reconnecting...', 'error');
-        scheduleReconnect();
-      }
-    });
-  }
-
-  async function scheduleReconnect() {
-    if (reconnecting) return;
-    if (retries >= MAX_RETRIES) {
-      showStatus('Stream lost after ' + MAX_RETRIES + ' retries.', 'error');
-      return;
-    }
-    reconnecting = true;
-    retries++;
-    const delay = RETRY_DELAYS[Math.min(retries - 1, RETRY_DELAYS.length - 1)];
-    showStatus('Reconnecting (' + retries + '/' + MAX_RETRIES + ') in ' + (delay/1000) + 's...', 'info');
-    await new Promise(r => setTimeout(r, delay));
-
-    try {
-      showStatus('Getting fresh stream...', 'info');
-      const res = await fetch('/api/reconnect', { method: 'POST' });
-      if (res.ok) {
-        const { url } = await fetch('/api/stream').then(r => r.json());
-        reconnecting = false;
-        startPlayer(url);
-      } else {
-        reconnecting = false;
-        showStatus('Reconnect failed \u2014 retrying...', 'error');
-        scheduleReconnect();
-      }
-    } catch (e) {
-      reconnecting = false;
-      showStatus('Reconnect error: ' + e.message, 'error');
-      scheduleReconnect();
-    }
-  }
-
-  loadStream();
-})();
-</script>
-</body>
-</html>
-"""
-
-# ── Dashboard HTML ───────────────────────────────────────────────
-
-_DASHBOARD_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TV Automator</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d2e;
-      --card: #1e2235;
-      --border: #2d3148;
-      --text: #e8eaf6;
-      --muted: #8b92b3;
-      --accent: #4f7dff;
-      --green: #22c55e;
-      --red: #ef4444;
-      --yellow: #f59e0b;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
-
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    header h1 { font-size: 1.3rem; font-weight: 700; white-space: nowrap; }
-
-    #now-playing-bar {
-      flex: 1; font-size: 0.88rem; color: var(--green);
-      font-weight: 600; display: none;
-    }
-
-    .controls {
-      display: flex; align-items: center; gap: 10px;
-      margin-left: auto; flex-wrap: wrap;
-    }
-
-    .date-nav { display: flex; align-items: center; gap: 8px; }
-    .date-nav span { min-width: 220px; text-align: center; font-size: 0.9rem; font-weight: 600; }
-
-    button {
-      background: var(--card); border: 1px solid var(--border); color: var(--text);
-      padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
-      line-height: 1.4; transition: background 0.12s;
-    }
-    button:hover { background: var(--border); }
-
-    .btn-stop { background: var(--red); border-color: #c53030; color: #fff; }
-    .btn-stop:hover { background: #c53030; }
-
-    .btn-feed {
-      padding: 6px 12px; font-size: 0.78rem; font-weight: 600;
-      border-radius: 5px; cursor: pointer; transition: background 0.12s;
-    }
-    .btn-home { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-home:hover { background: #3b6ae8; }
-    .btn-away { background: var(--card); border-color: var(--border); color: var(--text); }
-    .btn-away:hover { background: var(--border); }
-    .btn-feed:disabled { background: var(--border); border-color: var(--border); color: var(--muted); cursor: default; }
-
-    .auth-badge {
-      font-size: 0.78rem; font-weight: 600; padding: 3px 10px;
-      border-radius: 20px; white-space: nowrap;
-    }
-    .auth-ok  { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-    .auth-no  { background: rgba(239,68,68,0.12); color: var(--red);   border: 1px solid rgba(239,68,68,0.25); }
-
-    main { padding: 24px; max-width: 1280px; margin: 0 auto; }
-
-    #status-msg {
-      text-align: center; color: var(--muted); padding: 60px 24px; font-size: 1rem;
-    }
-
-    #game-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;
-    }
-
-    .game-card {
-      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 10px;
-      position: relative; transition: border-color 0.15s;
-    }
-    .game-card.live { border-color: var(--green); }
-    .game-card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-
-    .status-badge {
-      position: absolute; top: 12px; right: 12px; padding: 2px 9px; border-radius: 20px;
-      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-    }
-    .badge-live     { background: var(--green); color: #000; }
-    .badge-pre_game { background: var(--yellow); color: #000; }
-    .badge-scheduled { background: var(--border); color: var(--muted); }
-    .badge-final    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-    .badge-postponed, .badge-cancelled { background: var(--red); color: #fff; }
-    .badge-unknown  { background: var(--border); color: var(--muted); }
-
-    .matchup {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 6px 0 4px; gap: 8px;
-    }
-    .team { flex: 1; text-align: center; }
-    .team-abbr { font-size: 1.9rem; font-weight: 800; line-height: 1; }
-    .team-name {
-      font-size: 0.68rem; color: var(--muted); margin-top: 3px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-
-    .middle-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; }
-    .score-row { display: flex; align-items: center; gap: 10px; }
-    .score-val { font-size: 1.8rem; font-weight: 800; line-height: 1; }
-    .score-sep { color: var(--muted); font-size: 1rem; }
-    .at-sign { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
-    .inning-label { font-size: 0.75rem; color: var(--green); font-weight: 600; white-space: nowrap; }
-
-    .pitchers {
-      font-size: 0.72rem; color: var(--muted);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-
-    .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; }
-    .game-time { font-size: 0.82rem; color: var(--muted); }
-    .feed-btns { display: flex; gap: 6px; }
-    .now-playing-tag { font-size: 0.8rem; color: var(--accent); font-weight: 600; }
-  </style>
-</head>
-<body>
-<header>
-  <h1>TV Automator</h1>
-  <div id="now-playing-bar">&#9654; Now playing: <span id="np-name"></span></div>
-  <div class="controls">
-    <span id="auth-badge" class="auth-badge"></span>
-    <div class="date-nav">
-      <button onclick="changeDate(-1)">&#9664;</button>
-      <span id="date-label"></span>
-      <button onclick="changeDate(1)">&#9654;</button>
-    </div>
-    <button id="today-btn" onclick="goToToday()" style="display:none">Today</button>
-    <button id="stop-btn" class="btn-stop" onclick="stopPlayback()" style="display:none">&#9632; Stop</button>
-    <button onclick="loadGames()">&#8635; Refresh</button>
-  </div>
-</header>
-<main>
-  <div id="status-msg">Loading...</div>
-  <div id="game-grid"></div>
-</main>
-<script>
-  let currentDate = new Date();
-  currentDate.setHours(0, 0, 0, 0);
-  let nowPlayingId = null;
-  let refreshTimer = null;
-
-  function pad(n) { return String(n).padStart(2, '0'); }
-  function dateStr(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
-
-  function formatDateLabel(d) {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const y = new Date(today); y.setDate(today.getDate()-1);
-    const t = new Date(today); t.setDate(today.getDate()+1);
-    let label;
-    if (d.getTime()===today.getTime()) label='Today';
-    else if (d.getTime()===y.getTime()) label='Yesterday';
-    else if (d.getTime()===t.getTime()) label='Tomorrow';
-    else label=d.toLocaleDateString('en-US',{weekday:'long'});
-    return label+' \\u2014 '+d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
-  }
-
-  function changeDate(delta) { currentDate.setDate(currentDate.getDate()+delta); updateDateLabel(); loadGames(); }
-  function goToToday() { currentDate=new Date(); currentDate.setHours(0,0,0,0); updateDateLabel(); loadGames(); }
-  function updateDateLabel() {
-    document.getElementById('date-label').textContent=formatDateLabel(currentDate);
-    const today=new Date(); today.setHours(0,0,0,0);
-    document.getElementById('today-btn').style.display=currentDate.getTime()===today.getTime()?'none':'';
-  }
-
-  async function loadGames() {
-    clearTimeout(refreshTimer);
-    document.getElementById('game-grid').innerHTML='';
-    document.getElementById('status-msg').textContent='Loading...';
-    document.getElementById('status-msg').style.display='';
-    try {
-      const [gRes,sRes]=await Promise.all([fetch('/api/games?date='+dateStr(currentDate)),fetch('/api/status')]);
-      const games=await gRes.json(), status=await sRes.json();
-      nowPlayingId=status.now_playing_game_id;
-      updateStatus(games,status);
-      if(!games.length){document.getElementById('status-msg').textContent='No games scheduled.';}
-      else{document.getElementById('status-msg').style.display='none';renderGames(games);}
-    } catch(e){document.getElementById('status-msg').textContent='Error: '+e.message;}
-    refreshTimer=setTimeout(loadGames,30000);
-  }
-
-  function updateStatus(games,status) {
-    const bar=document.getElementById('now-playing-bar'),stopBtn=document.getElementById('stop-btn');
-    if(nowPlayingId){
-      const g=games.find(x=>x.game_id===nowPlayingId);
-      document.getElementById('np-name').textContent=g?g.display_matchup:nowPlayingId;
-      bar.style.display='';stopBtn.style.display='';
-    } else { bar.style.display='none';stopBtn.style.display='none'; }
-    const badge=document.getElementById('auth-badge');
-    badge.className='auth-badge '+(status.authenticated?'auth-ok':'auth-no');
-    badge.textContent=status.authenticated?'\\u2713 Logged in':'\\u2717 No auth';
-  }
-
-  function renderGames(games){document.getElementById('game-grid').innerHTML=games.map(gameCardHTML).join('');}
-  function badgeClass(s){return 'badge-'+(s==='pre_game'?'pre_game':s);}
-
-  function gameCardHTML(g) {
-    const isLive=g.status==='live', isPlaying=g.game_id===nowPlayingId;
-    const canWatch=g.is_watchable||g.status==='final';
-    const inning=g.extra&&g.extra.current_inning, inningState=g.extra&&g.extra.inning_state;
-    const inningHTML=(isLive&&inning)?'<div class="inning-label">'+(inningState?inningState+' ':'')+inning+'</div>':'';
-
-    let middleHTML;
-    if(g.display_score){
-      middleHTML='<div class="middle-col"><div class="score-row"><span class="score-val">'+g.away_team.score
-        +'</span><span class="score-sep">\\u2014</span><span class="score-val">'+g.home_team.score
-        +'</span></div>'+inningHTML+'</div>';
-    } else { middleHTML='<div class="middle-col"><span class="at-sign">@</span></div>'; }
-
-    const pp=[];
-    if(g.extra&&g.extra.away_probable_pitcher) pp.push(g.away_team.abbreviation+': '+g.extra.away_probable_pitcher);
-    if(g.extra&&g.extra.home_probable_pitcher) pp.push(g.home_team.abbreviation+': '+g.extra.home_probable_pitcher);
-    const pitcherHTML=(!g.display_score&&pp.length)?'<div class="pitchers">'+pp.join(' \\u00b7 ')+'</div>':'';
-
-    let actionHTML;
-    if(isPlaying){
-      actionHTML='<span class="now-playing-tag">&#9654; Playing</span>';
-    } else if(canWatch){
-      actionHTML='<div class="feed-btns">'
-        +'<button class="btn-feed btn-away" onclick="playGame(\\''+g.game_id+'\\',\\'AWAY\\')">Away</button>'
-        +'<button class="btn-feed btn-home" onclick="playGame(\\''+g.game_id+'\\',\\'HOME\\')">Home</button>'
-        +'</div>';
-    } else {
-      actionHTML='<div class="feed-btns"><button class="btn-feed" disabled>Not available</button></div>';
-    }
-
-    const cls=['game-card',isLive?'live':'',isPlaying?'playing':''].filter(Boolean).join(' ');
-    return '<div class="'+cls+'">'
-      +'<span class="status-badge '+badgeClass(g.status)+'">'+g.status_label+'</span>'
-      +'<div class="matchup">'
-      +'<div class="team"><div class="team-abbr">'+g.away_team.abbreviation+'</div><div class="team-name">'+g.away_team.name+'</div></div>'
-      +middleHTML
-      +'<div class="team"><div class="team-abbr">'+g.home_team.abbreviation+'</div><div class="team-name">'+g.home_team.name+'</div></div>'
-      +'</div>'
-      +pitcherHTML
-      +'<div class="card-footer"><span class="game-time">'+g.display_time+'</span>'+actionHTML+'</div>'
-      +'</div>';
-  }
-
-  async function playGame(gameId,feed) {
-    try {
-      const res=await fetch('/api/play/'+gameId+'?date='+dateStr(currentDate)+'&feed='+feed,{method:'POST'});
-      const data=await res.json();
-      if(res.ok&&data.success){nowPlayingId=gameId;loadGames();}
-      else{alert(data.detail||'Playback failed');}
-    } catch(e){alert('Error: '+e.message);}
-  }
-
-  async function stopPlayback(){
-    try{await fetch('/api/stop',{method:'POST'});nowPlayingId=null;loadGames();}
-    catch(e){alert('Error: '+e.message);}
-  }
-
-  updateDateLabel();
-  loadGames();
-</script>
-</body>
-</html>
-"""

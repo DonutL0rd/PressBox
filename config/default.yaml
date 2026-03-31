@@ -30,4 +30,8 @@ scheduler:
   # Minutes before game start to begin setup
   pre_game_minutes: 5
 
+cec:
+  enabled: false
+  power_off_on_stop: true
+
 data_dir: "/data"

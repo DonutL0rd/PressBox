@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TV Automator Player</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+  video { display: block; width: 100%; height: 100%; object-fit: contain; }
+  #status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            font-family: sans-serif; font-size: 1rem;
+            background: rgba(0,0,0,0.85); padding: 10px 24px; border-radius: 8px;
+            display: none; z-index: 10; transition: opacity 0.3s; }
+  .error { color: #ef4444; }
+  .info  { color: #8b92b3; }
+</style>
+</head>
+<body>
+<video id="video" autoplay></video>
+<div id="status"></div>
+<script src="/static/hls.min.js"></script>
+<script>
+(function() {
+  const video = document.getElementById('video');
+  const statusEl = document.getElementById('status');
+  let hls = null;
+  let retries = 0;
+  let reconnecting = false;
+  const MAX_RETRIES = 5;
+  const RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
+
+  function showStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = cls || '';
+    statusEl.style.display = '';
+  }
+  function hideStatus() { statusEl.style.display = 'none'; }
+
+  async function loadStream() {
+    try {
+      console.log('[player] Loading stream...');
+      const res = await fetch('/api/stream');
+      if (!res.ok) { showStatus('No stream available', 'error'); return; }
+      const { url } = await res.json();
+      console.log('[player] Got stream URL:', url.substring(0, 80));
+      startPlayer(url);
+    } catch (e) {
+      console.error('[player] Load failed:', e);
+      showStatus('Failed to load stream: ' + e.message, 'error');
+      scheduleReconnect();
+    }
+  }
+
+  function startPlayer(url) {
+    if (hls) { hls.destroy(); hls = null; }
+
+    if (!Hls.isSupported()) {
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play();
+        return;
+      }
+      showStatus('HLS not supported', 'error');
+      return;
+    }
+
+    hls = new Hls({
+      maxBufferLength: 30,
+      maxMaxBufferLength: 120,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 6,
+      enableWorker: true,
+    });
+    hls.loadSource(url);
+    hls.attachMedia(video);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, function(_, data) {
+      console.log('[player] Manifest parsed, levels:', data.levels ? data.levels.length : 0);
+      video.play().then(function() {
+        console.log('[player] Playback started');
+      }).catch(function(e) {
+        console.error('[player] Play rejected:', e);
+      });
+      retries = 0;
+      hideStatus();
+    });
+
+    hls.on(Hls.Events.ERROR, function(_, data) {
+      console.error('[player] HLS error:', data.type, data.details, 'fatal:', data.fatal, 'reason:', data.reason || '');
+      if (!data.fatal) return;
+
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        showStatus('Network error \u2014 reconnecting...', 'info');
+        hls.startLoad();
+        setTimeout(function() {
+          if (hls && hls.media && hls.media.paused) {
+            scheduleReconnect();
+          }
+        }, 10000);
+      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        showStatus('Media error \u2014 recovering...', 'info');
+        hls.recoverMediaError();
+      } else {
+        showStatus('Fatal error \u2014 reconnecting...', 'error');
+        scheduleReconnect();
+      }
+    });
+  }
+
+  async function scheduleReconnect() {
+    if (reconnecting) return;
+    if (retries >= MAX_RETRIES) {
+      showStatus('Stream lost after ' + MAX_RETRIES + ' retries.', 'error');
+      return;
+    }
+    reconnecting = true;
+    retries++;
+    const delay = RETRY_DELAYS[Math.min(retries - 1, RETRY_DELAYS.length - 1)];
+    showStatus('Reconnecting (' + retries + '/' + MAX_RETRIES + ') in ' + (delay/1000) + 's...', 'info');
+    await new Promise(r => setTimeout(r, delay));
+
+    try {
+      showStatus('Getting fresh stream...', 'info');
+      const res = await fetch('/api/reconnect', { method: 'POST' });
+      if (res.ok) {
+        const { url } = await fetch('/api/stream').then(r => r.json());
+        reconnecting = false;
+        startPlayer(url);
+      } else {
+        reconnecting = false;
+        showStatus('Reconnect failed \u2014 retrying...', 'error');
+        scheduleReconnect();
+      }
+    } catch (e) {
+      reconnecting = false;
+      showStatus('Reconnect error: ' + e.message, 'error');
+      scheduleReconnect();
+    }
+  }
+
+  loadStream();
+})();
+</script>
+</body>
+</html>

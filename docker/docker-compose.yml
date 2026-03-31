@@ -22,7 +22,7 @@ services:
 
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - /home/nrm/.Xauthority:/root/.Xauthority:ro
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
       - tv-automator-data:/data
 
     env_file:
@@ -30,7 +30,6 @@ services:
 
     environment:
       - DISPLAY=${DISPLAY:-:0}
-      - XAUTHORITY=/root/.Xauthority
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - DATA_DIR=/data
 

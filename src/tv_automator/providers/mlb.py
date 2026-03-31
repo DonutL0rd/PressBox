@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 import statsapi
 
@@ -26,6 +29,28 @@ _STATUS_MAP: dict[str, GameStatus] = {
     "Delayed": GameStatus.PRE_GAME,
     "Delayed Start": GameStatus.PRE_GAME,
 }
+
+
+MLB_TEAMS = [
+    {"abbreviation": abbr, "name": name}
+    for name, abbr in {
+        "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
+        "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
+        "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
+        "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
+        "Colorado Rockies": "COL", "Detroit Tigers": "DET",
+        "Houston Astros": "HOU", "Kansas City Royals": "KC",
+        "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
+        "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
+        "Minnesota Twins": "MIN", "New York Mets": "NYM",
+        "New York Yankees": "NYY", "Oakland Athletics": "OAK",
+        "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT",
+        "San Diego Padres": "SD", "San Francisco Giants": "SF",
+        "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
+        "Tampa Bay Rays": "TB", "Texas Rangers": "TEX",
+        "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+    }.items()
+]
 
 
 class MLBProvider(StreamingProvider):
@@ -54,7 +79,13 @@ class MLBProvider(StreamingProvider):
         for g in raw_games:
             try:
                 status = _STATUS_MAP.get(g.get("status", "Unknown"), GameStatus.UNKNOWN)
-                game_datetime = datetime.fromisoformat(g.get("game_datetime", date_str))
+                game_datetime = datetime.fromisoformat(
+                    g.get("game_datetime", date_str).replace("Z", "+00:00")
+                )
+                # Normalize to naive UTC first, then convert to Pacific
+                if game_datetime.tzinfo is None:
+                    game_datetime = game_datetime.replace(tzinfo=timezone.utc)
+                game_datetime = game_datetime.astimezone(_PACIFIC)
 
                 away_team = Team(
                     name=g.get("away_name", "Unknown"),

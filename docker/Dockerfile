@@ -7,7 +7,7 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
-ENV TZ=America/New_York
+ENV TZ=America/Los_Angeles
 
 # ── System packages ──────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg wget \
     python3.11 python3.11-venv python3-pip \
     xdg-utils openbox xdotool x11-utils xvfb \
-    pulseaudio alsa-utils \
+    pulseaudio alsa-utils cec-utils \
     fonts-liberation fonts-noto \
     locales dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
