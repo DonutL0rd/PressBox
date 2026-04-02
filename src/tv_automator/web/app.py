@@ -15,6 +15,8 @@ from pathlib import Path
 
 from urllib.parse import urljoin
 
+import xml.etree.ElementTree as ET
+
 import httpx
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -35,6 +37,7 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _PLAYER_HTML = (_TEMPLATE_DIR / "player.html").read_text()
 _DASHBOARD_HTML = (_TEMPLATE_DIR / "dashboard.html").read_text()
 _SCREENSAVER_HTML = (_TEMPLATE_DIR / "screensaver.html").read_text()
+_YOUTUBE_HTML = (_TEMPLATE_DIR / "youtube.html").read_text()
 
 # ── App state ────────────────────────────────────────────────────
 
@@ -48,23 +51,166 @@ _scheduler: GameScheduler
 _now_playing_game_id: str | None = None
 _now_playing_feed: str = "HOME"
 _stream_info: StreamInfo | None = None
+_youtube_mode: bool = False
+_player_levels: list[dict] = []   # quality levels reported by player after manifest parse
+_player_command: dict | None = None  # pending command for player (consumed on read)
+_youtube_video_id: str | None = None   # currently playing YouTube video ID
 _autoplay_queue: dict | None = None  # {game_id, feed, display_matchup, display_time}
 _play_lock: asyncio.Lock
 _heartbeat_task: asyncio.Task | None = None
 _watchdog_task: asyncio.Task | None = None
 _expiry_task: asyncio.Task | None = None
+_progress_task: asyncio.Task | None = None   # periodic YouTube progress saver
 _browser_started_at: float = 0  # monotonic time
 CHROME_RECYCLE_HOURS = 8  # restart Chrome after this many hours of idle
+
+# ── Watch history ─────────────────────────────────────────────────
+# Stored as list (newest first) in /data/watch_history.json.
+# Kept as dict[video_id → entry] in memory for O(1) lookup.
+_watch_history: dict[str, dict] = {}
 
 # WebSocket clients
 _ws_clients: set[WebSocket] = set()
 _last_games_hash: str = ""
+
+# ── Batter intel / between-innings caches ────────────────────────
+_last_batter_id: int | None = None
+_batter_vs_pitcher_cache: dict[tuple[int, int], dict | None] = {}
+_other_scores_cache: list[dict] = []
+_other_scores_cache_time: float = 0
+OTHER_SCORES_TTL = 30  # seconds
+
+# ── Suggested YouTube channels ──────────────────────────────────
+# channel_id → display name
+SUGGESTED_CHANNELS: dict[str, str] = {
+    "UCsBjURrPoezykLs9EqgamOA": "Fireship",
+    "UCYO_jab_esuFRV4b17AJtAw": "3Blue1Brown",
+    "UCBJycsmduvYEL83R_U4JriQ": "MKBHD",
+    "UCKelCK4ZaO6HeEI1KQjqzWA": "AI Daily Brief",
+}
+_suggested_cache: dict[str, list[dict]] = {}
+_suggested_cache_time: float = 0
+SUGGESTED_CACHE_TTL = 1800  # 30 minutes
+
+
+# ── Watch history helpers ────────────────────────────────────────
+
+def _history_path() -> Path:
+    return Path(_config.data_dir) / "watch_history.json"
+
+
+def _load_history() -> None:
+    global _watch_history
+    try:
+        data = json.loads(_history_path().read_text())
+        _watch_history = {e["video_id"]: e for e in data}
+    except Exception:
+        _watch_history = {}
+
+
+def _save_history() -> None:
+    entries = sorted(_watch_history.values(), key=lambda e: e.get("last_watched", ""), reverse=True)
+    try:
+        _history_path().write_text(json.dumps(entries, indent=2))
+    except Exception:
+        log.exception("Failed to save watch history")
+
+
+async def _fetch_video_info(video_id: str) -> dict:
+    """Fetch title and channel from YouTube oEmbed (no API key needed)."""
+    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url)
+            if r.status_code == 200:
+                d = r.json()
+                return {"title": d.get("title", ""), "channel": d.get("author_name", "")}
+    except Exception:
+        pass
+    return {"title": "", "channel": ""}
+
+
+def _history_record_start(video_id: str, info: dict) -> None:
+    """Create or refresh a history entry when playback begins."""
+    now = datetime.now(timezone.utc).isoformat()
+    if video_id in _watch_history:
+        _watch_history[video_id]["last_watched"] = now
+        if info.get("title"):
+            _watch_history[video_id]["title"] = info["title"]
+            _watch_history[video_id]["channel"] = info.get("channel", "")
+    else:
+        _watch_history[video_id] = {
+            "video_id": video_id,
+            "title": info.get("title", ""),
+            "channel": info.get("channel", ""),
+            "duration": 0.0,
+            "position": 0.0,
+            "completed": False,
+            "first_watched": now,
+            "last_watched": now,
+        }
+    _save_history()
+
+
+async def _save_current_progress(completed: bool = False) -> None:
+    """Read position from the browser and persist it."""
+    global _watch_history
+    if not _youtube_video_id:
+        return
+    raw = await _browser.evaluate("window.ytGetState ? window.ytGetState() : null")
+    if not raw:
+        return
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return
+    position = state.get("currentTime", 0)
+    duration = state.get("duration", 0)
+    if _youtube_video_id not in _watch_history:
+        return
+    entry = _watch_history[_youtube_video_id]
+    entry["position"] = round(position, 1)
+    if duration > 0:
+        entry["duration"] = round(duration, 1)
+    if completed or (duration > 0 and position / duration >= 0.90):
+        entry["completed"] = True
+        entry["position"] = 0.0   # reset so replay starts from beginning
+    entry["last_watched"] = datetime.now(timezone.utc).isoformat()
+    _save_history()
+    log.debug("Progress saved: %s %.0fs/%.0fs completed=%s",
+              _youtube_video_id, position, duration, entry["completed"])
+
+
+async def _progress_save_loop() -> None:
+    """Save YouTube playback position to disk every 30 seconds."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await _save_current_progress()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            log.exception("Progress save error")
+
+
+def _start_progress_task() -> None:
+    global _progress_task
+    _stop_progress_task()
+    _progress_task = asyncio.create_task(_progress_save_loop())
+
+
+def _stop_progress_task() -> None:
+    global _progress_task
+    if _progress_task and not _progress_task.done():
+        _progress_task.cancel()
+    _progress_task = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _config, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _watchdog_task
     _config = Config()
+    _load_history()
     _browser = BrowserController(_config)
     _cec = CECController(enabled=_config.cec.get("enabled", False))
     _mlb = MLBProvider()
@@ -102,9 +248,9 @@ async def lifespan(app: FastAPI):
     # Start the watchdog
     _watchdog_task = asyncio.create_task(_watchdog_loop())
 
-    # Navigate to screensaver on startup
+    # Navigate to screensaver once the server is ready (retry — browser starts before uvicorn binds)
     if _browser.is_running:
-        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+        asyncio.create_task(_initial_navigate())
 
     yield
 
@@ -113,6 +259,7 @@ async def lifespan(app: FastAPI):
         _watchdog_task.cancel()
     _stop_heartbeat()
     _stop_expiry_timer()
+    _stop_progress_task()
     await _scheduler.stop()
     await _session.close()
     await _browser.stop()
@@ -122,6 +269,15 @@ app = FastAPI(lifespan=lifespan)
 
 
 # ── Background tasks ────────────────────────────────────────────
+
+async def _initial_navigate() -> None:
+    """Navigate to the screensaver after uvicorn finishes binding."""
+    for _ in range(20):
+        await asyncio.sleep(0.5)
+        if await _browser.navigate("http://127.0.0.1:5000/screensaver"):
+            return
+    log.warning("Initial screensaver navigation failed after retries")
+
 
 async def _heartbeat_loop() -> None:
     """Send periodic heartbeats to keep the MLB stream alive."""
@@ -268,6 +424,7 @@ async def _broadcast_status() -> None:
     await _broadcast({
         "type": "status",
         "now_playing_game_id": _now_playing_game_id,
+        "youtube_mode": _youtube_mode,
         "authenticated": _session.is_authenticated,
         "browser_running": _browser.is_running,
         "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
@@ -318,6 +475,87 @@ async def _on_schedule_refresh() -> None:
 
 # ── Play / reconnect logic ──────────────────────────────────────
 
+async def _get_condensed_url(game_id: str) -> str | None:
+    """Fetch condensed game video URL from the public MLB Stats API content endpoint."""
+    url = f"https://statsapi.mlb.com/api/v1/game/{game_id}/content"
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                log.warning("Content endpoint returned %d for game %s", resp.status_code, game_id)
+                return None
+            data = resp.json()
+        except Exception:
+            log.exception("Failed to fetch content for game %s", game_id)
+            return None
+
+    # Search highlights for the condensed game video
+    items = data.get("highlights", {}).get("highlights", {}).get("items", [])
+    for item in items:
+        headline = (item.get("headline") or "").lower()
+        slug = (item.get("slug") or "").lower()
+        keywords = item.get("keywordsAll") or []
+        keyword_vals = {k.get("type", ""): k.get("value", "") for k in keywords}
+
+        is_condensed = (
+            "condensed" in headline
+            or "condensed" in slug
+            or keyword_vals.get("taxonomy") == "condensedGame"
+            or "cg" in slug
+        )
+        if not is_condensed:
+            continue
+
+        playbacks = item.get("playbacks") or []
+        # Prefer HLS, then highest quality mp4
+        for pb in playbacks:
+            if "hls" in (pb.get("name") or "").lower():
+                log.info("Found condensed HLS for game %s: %s", game_id, pb["url"][:80])
+                return pb["url"]
+        for pb in playbacks:
+            name = (pb.get("name") or "").lower()
+            if "mp4avc" in name or "highbit" in name:
+                log.info("Found condensed MP4 for game %s: %s", game_id, pb["url"][:80])
+                return pb["url"]
+        # Any playback at all
+        if playbacks:
+            log.info("Found condensed playback for game %s: %s", game_id, playbacks[0].get("url", "")[:80])
+            return playbacks[0].get("url")
+
+    log.warning("No condensed game found for game %s (%d highlight items checked)", game_id, len(items))
+    return None
+
+
+async def _do_play_condensed(game_id: str) -> StreamInfo:
+    """Play a condensed game replay from the public MLB CDN (no auth needed)."""
+    global _now_playing_game_id, _now_playing_feed, _stream_info, _browser_started_at
+
+    url = await _get_condensed_url(game_id)
+    if not url:
+        raise HTTPException(404, "Condensed game not available — it may take a few hours after the game ends")
+
+    info = StreamInfo(url=url, direct=True)
+    _stream_info = info
+    _now_playing_game_id = game_id
+    _now_playing_feed = "CONDENSED"
+    # No heartbeat or expiry needed for public VOD
+
+    if _cec.enabled:
+        await _cec.power_on()
+        await _cec.set_active_source()
+
+    if not _browser.is_running:
+        await _browser.start()
+        _browser_started_at = time.monotonic()
+
+    ok = await _browser.navigate("http://127.0.0.1:5000/player")
+    if not ok:
+        raise HTTPException(503, "Failed to navigate browser to player")
+
+    await _broadcast_status()
+    return info
+
+
 async def _do_play(game_id: str, feed: str) -> StreamInfo:
     """Get a stream and navigate Chrome to the player. Returns StreamInfo."""
     global _now_playing_game_id, _now_playing_feed, _stream_info
@@ -362,15 +600,21 @@ async def _do_reconnect() -> StreamInfo | None:
     _stop_expiry_timer()
 
     try:
-        info = await _session.get_stream_info(_now_playing_game_id, _now_playing_feed)
-        if not info:
-            log.error("Reconnect failed — no stream URL")
-            return None
+        if _now_playing_feed == "CONDENSED":
+            url = await _get_condensed_url(_now_playing_game_id)
+            if not url:
+                log.error("Reconnect failed — condensed game not available")
+                return None
+            info = StreamInfo(url=url, direct=True)
+        else:
+            info = await _session.get_stream_info(_now_playing_game_id, _now_playing_feed)
+            if not info:
+                log.error("Reconnect failed — no stream URL")
+                return None
+            _start_heartbeat()
+            _start_expiry_timer()
 
         _stream_info = info
-        _start_heartbeat()
-        _start_expiry_timer()
-
         await _browser.navigate("http://127.0.0.1:5000/player")
         log.info("Reconnected successfully")
         return info
@@ -380,12 +624,19 @@ async def _do_reconnect() -> StreamInfo | None:
 
 
 async def _do_stop() -> None:
-    global _now_playing_game_id, _now_playing_feed, _stream_info
+    global _now_playing_game_id, _now_playing_feed, _stream_info, _youtube_mode, _youtube_video_id, _player_levels, _player_command
     _stop_heartbeat()
     _stop_expiry_timer()
+    _stop_progress_task()
+    if _youtube_mode:
+        await _save_current_progress()
     _now_playing_game_id = None
     _now_playing_feed = "HOME"
     _stream_info = None
+    _youtube_mode = False
+    _youtube_video_id = None
+    _player_levels = []
+    _player_command = None
 
     # Navigate to screensaver instead of blank
     if _browser.is_running:
@@ -452,7 +703,10 @@ async def play_game(game_id: str, date: str | None = None, feed: str = "HOME"):
 
     async with _play_lock:
         _stop_heartbeat()
-        info = await _do_play(game_id, feed.upper())
+        if feed.upper() == "CONDENSED":
+            info = await _do_play_condensed(game_id)
+        else:
+            info = await _do_play(game_id, feed.upper())
         return {"success": True, "feed": feed.upper()}
 
 
@@ -461,6 +715,581 @@ async def stop_playback():
     async with _play_lock:
         await _do_stop()
     return {"success": True}
+
+
+def _extract_youtube_id(url: str) -> str | None:
+    """Extract a YouTube video ID from common URL formats."""
+    m = re.search(
+        r'(?:youtube\.com/watch\?(?:[^&]*&)*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)'
+        r'([a-zA-Z0-9_-]{11})',
+        url,
+    )
+    return m.group(1) if m else None
+
+
+@app.post("/api/youtube")
+async def play_youtube(body: dict):
+    """Navigate the TV browser to a YouTube video."""
+    global _youtube_mode, _youtube_video_id, _now_playing_game_id, _now_playing_feed, _stream_info
+    url = body.get("url", "").strip()
+    video_id = _extract_youtube_id(url)
+    if not video_id:
+        raise HTTPException(400, "Invalid YouTube URL — paste a youtube.com or youtu.be link")
+
+    if not _browser.is_running:
+        raise HTTPException(503, "Browser not running — check DISPLAY / X11")
+
+    # Build nav URL — support resume position
+    resume_pos = body.get("resume_position", 0)
+    nav_url = f"http://127.0.0.1:5000/youtube?v={video_id}"
+    if resume_pos and resume_pos > 5:
+        nav_url += f"&t={int(resume_pos)}"
+
+    async with _play_lock:
+        # Save progress for any currently playing YouTube video before switching
+        if _youtube_mode and _youtube_video_id:
+            await _save_current_progress()
+        _stop_progress_task()
+
+        # Stop any active MLB stream (without navigating away)
+        if _now_playing_game_id:
+            _stop_heartbeat()
+            _stop_expiry_timer()
+            _now_playing_game_id = None
+            _now_playing_feed = "HOME"
+            _stream_info = None
+
+        _youtube_mode = True
+        _youtube_video_id = video_id
+        await _browser.navigate(nav_url)
+
+    # Fetch video info and record in history (async, don't block response)
+    async def _record():
+        info = await _fetch_video_info(video_id)
+        _history_record_start(video_id, info)
+        _start_progress_task()
+
+    asyncio.create_task(_record())
+    await _broadcast_status()
+    log.info("YouTube: playing video %s (resume=%.0fs)", video_id, resume_pos)
+    return {"success": True, "video_id": video_id}
+
+
+@app.post("/api/screensaver")
+async def show_screensaver(body: dict | None = None):
+    """Navigate the TV browser to the screensaver."""
+    global _youtube_mode, _youtube_video_id
+    completed = (body or {}).get("completed", False)
+    async with _play_lock:
+        if _now_playing_game_id:
+            await _do_stop()  # also navigates to screensaver
+        else:
+            if _youtube_mode:
+                _stop_progress_task()
+                await _save_current_progress(completed=completed)
+            _youtube_mode = False
+            _youtube_video_id = None
+            if _browser.is_running:
+                await _browser.navigate("http://127.0.0.1:5000/screensaver")
+            await _broadcast_status()
+    return {"success": True}
+
+
+@app.get("/api/youtube/history")
+async def get_youtube_history():
+    entries = sorted(_watch_history.values(), key=lambda e: e.get("last_watched", ""), reverse=True)
+    return entries
+
+
+@app.delete("/api/youtube/history/{video_id}")
+async def delete_youtube_history(video_id: str):
+    _watch_history.pop(video_id, None)
+    _save_history()
+    return {"success": True}
+
+
+@app.get("/api/youtube/suggested")
+async def get_suggested_videos():
+    """Return recent videos from curated YouTube channels via public RSS feeds."""
+    global _suggested_cache, _suggested_cache_time
+    now = time.monotonic()
+    if _suggested_cache and (now - _suggested_cache_time) < SUGGESTED_CACHE_TTL:
+        return _suggested_cache
+
+    results: dict[str, list[dict]] = {}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for channel_id, channel_name in SUGGESTED_CHANNELS.items():
+            try:
+                url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    results[channel_name] = []
+                    continue
+                root = ET.fromstring(resp.text)
+                ns = {"atom": "http://www.w3.org/2005/Atom", "media": "http://search.yahoo.com/mrss/"}
+                entries = root.findall("atom:entry", ns)
+                videos = []
+                for entry in entries:
+                    vid_id_el = entry.find("atom:id", ns)
+                    title_el = entry.find("atom:title", ns)
+                    published_el = entry.find("atom:published", ns)
+                    thumb_el = entry.find("media:group/media:thumbnail", ns)
+                    vid_text = vid_id_el.text if vid_id_el is not None else ""
+                    video_id = vid_text.split(":")[-1] if vid_text else ""
+                    title = title_el.text if title_el is not None else ""
+                    # Skip Shorts
+                    if "#shorts" in title.lower() or "#short" in title.lower():
+                        continue
+                    videos.append({
+                        "video_id": video_id,
+                        "title": title,
+                        "published": published_el.text if published_el is not None else "",
+                        "thumbnail": thumb_el.get("url", "") if thumb_el is not None else "",
+                        "channel": channel_name,
+                    })
+                    if len(videos) >= 6:
+                        break
+                results[channel_name] = videos
+            except Exception:
+                log.exception("Failed to fetch RSS for %s", channel_name)
+                results[channel_name] = []
+
+    _suggested_cache = results
+    _suggested_cache_time = now
+    return results
+
+
+@app.get("/api/youtube/state")
+async def youtube_state():
+    """Return current YouTube player state (time, duration, paused, volume)."""
+    if not _youtube_mode:
+        return {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
+    raw = await _browser.evaluate("window.ytGetState ? window.ytGetState() : null")
+    if raw:
+        return json.loads(raw)
+    return {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
+
+
+@app.post("/api/youtube/command")
+async def youtube_command(body: dict):
+    """Send a playback command to the YouTube player running in Chrome."""
+    if not _youtube_mode:
+        raise HTTPException(400, "YouTube mode not active")
+    cmd = body.get("cmd")
+    simple = {"play": "window.ytPlay()", "pause": "window.ytPause()",
+               "mute": "window.ytMute()", "unmute": "window.ytUnmute()"}
+    if cmd in simple:
+        await _browser.evaluate(simple[cmd])
+    elif cmd == "seek":
+        t = float(body.get("time", 0))
+        await _browser.evaluate(f"window.ytSeek({t})")
+    elif cmd == "volume":
+        v = max(0, min(100, int(body.get("volume", 50))))
+        await _browser.evaluate(f"window.ytSetVolume({v})")
+    elif cmd == "speed":
+        allowed = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0}
+        r = float(body.get("rate", 1.0))
+        if r not in allowed:
+            r = 1.0
+        await _browser.evaluate(f"window.ytSetSpeed({r})")
+    elif cmd == "cc":
+        on = bool(body.get("enabled", False))
+        await _browser.evaluate(f"window.ytSetCC({'true' if on else 'false'})")
+    else:
+        raise HTTPException(400, f"Unknown command: {cmd}")
+    return {"success": True}
+
+
+async def _fetch_other_scores() -> list[dict]:
+    """Cached fetch of other live game scores from the MLB schedule endpoint."""
+    global _other_scores_cache, _other_scores_cache_time
+    now = time.monotonic()
+    if _other_scores_cache and (now - _other_scores_cache_time) < OTHER_SCORES_TTL:
+        return _other_scores_cache
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=linescore"
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return _other_scores_cache
+            data = resp.json()
+        scores = []
+        for date_entry in data.get("dates", []):
+            for g in date_entry.get("games", []):
+                gid = str(g.get("gamePk", ""))
+                if gid == _now_playing_game_id:
+                    continue
+                ls = g.get("linescore", {})
+                teams_g = g.get("teams", {})
+                status = g.get("status", {})
+                state = status.get("detailedState", "")
+                inn = ls.get("currentInningOrdinal", "")
+                half = ls.get("inningHalf", "")
+                scores.append({
+                    "away": teams_g.get("away", {}).get("team", {}).get("abbreviation", ""),
+                    "home": teams_g.get("home", {}).get("team", {}).get("abbreviation", ""),
+                    "away_score": teams_g.get("away", {}).get("score", 0),
+                    "home_score": teams_g.get("home", {}).get("score", 0),
+                    "inning": f"{half} {inn}" if half and inn else "",
+                    "state": state,
+                })
+        _other_scores_cache = scores
+        _other_scores_cache_time = now
+        return scores
+    except Exception:
+        log.debug("Failed to fetch other scores", exc_info=True)
+        return _other_scores_cache
+
+
+def _get_due_up(boxscore: dict, inning_state: str) -> list[dict]:
+    """Get the next 3 batters due up based on batting order and inning state."""
+    # Middle = home bats next, End = away bats next
+    team_key = "home" if inning_state == "Middle" else "away"
+    team = boxscore.get("teams", {}).get(team_key, {})
+    order = team.get("battingOrder", [])
+    players = team.get("players", {})
+    if not order:
+        return []
+
+    # Find who batted last by checking game stats for at-bats
+    # Simple approach: walk order, find last batter with at-bats, return next 3
+    last_idx = 0
+    for i, pid in enumerate(order):
+        pd = players.get(f"ID{pid}", {})
+        ab = pd.get("stats", {}).get("batting", {}).get("atBats", 0)
+        bb = pd.get("stats", {}).get("batting", {}).get("baseOnBalls", 0)
+        if ab > 0 or bb > 0:
+            last_idx = i
+
+    due = []
+    for offset in range(1, 4):
+        idx = (last_idx + offset) % len(order)
+        pid = order[idx]
+        pd = players.get(f"ID{pid}", {})
+        season = pd.get("seasonStats", {}).get("batting", {})
+        due.append({
+            "name": pd.get("person", {}).get("fullName", ""),
+            "avg": season.get("avg", ".000"),
+            "hr": season.get("homeRuns", 0),
+            "rbi": season.get("rbi", 0),
+        })
+    return due
+
+
+def _get_pitcher_summary(boxscore: dict, linescore: dict, inning_state: str) -> dict | None:
+    """Get the current pitcher's stats for the break overlay."""
+    # Middle = home was pitching (top just ended), End = away was pitching (bottom just ended)
+    team_key = "away" if inning_state == "Middle" else "home"
+    team = boxscore.get("teams", {}).get(team_key, {})
+    pitcher_ids = team.get("pitchers", [])
+    players = team.get("players", {})
+    if not pitcher_ids:
+        return None
+    # Current pitcher is the last one in the list
+    pid = pitcher_ids[-1]
+    pd = players.get(f"ID{pid}", {})
+    stats = pd.get("stats", {}).get("pitching", {})
+    return {
+        "name": pd.get("person", {}).get("fullName", ""),
+        "pitches": stats.get("numberOfPitches", 0),
+        "strikes": stats.get("strikes", 0),
+        "ip": stats.get("inningsPitched", "0.0"),
+        "k": stats.get("strikeOuts", 0),
+        "h": stats.get("hits", 0),
+        "er": stats.get("earnedRuns", 0),
+    }
+
+
+@app.get("/api/pitches")
+async def get_pitches():
+    """Return pitch data, batter intel, and between-innings break data."""
+    global _last_batter_id
+
+    empty = {"pitches": [], "batter": "", "pitcher": "", "count": "", "outs": 0,
+             "inning": "", "batter_intel": None, "break_data": None}
+    if not _now_playing_game_id:
+        return empty
+    try:
+        url = f"https://statsapi.mlb.com/api/v1.1/game/{_now_playing_game_id}/feed/live"
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return empty
+            data = resp.json()
+
+        live = data.get("liveData", {})
+        linescore = live.get("linescore", {})
+        boxscore = live.get("boxscore", {})
+        plays = live.get("plays", {})
+        current = plays.get("currentPlay", {})
+        matchup = current.get("matchup", {})
+
+        batter_name = matchup.get("batter", {}).get("fullName", "")
+        pitcher_name = matchup.get("pitcher", {}).get("fullName", "")
+        batter_id = matchup.get("batter", {}).get("id")
+        pitcher_id = matchup.get("pitcher", {}).get("id")
+
+        count_data = current.get("count", {})
+        balls = count_data.get("balls", 0)
+        strikes = count_data.get("strikes", 0)
+        outs = count_data.get("outs", 0)
+        count_str = f"{balls}-{strikes}"
+
+        inning_half = linescore.get("inningHalf", "")
+        inning_num = linescore.get("currentInning", "")
+        inning_str = f"{inning_half} {inning_num}" if inning_half else ""
+        inning_state = linescore.get("inningState", "")  # Top, Middle, Bottom, End
+
+        # ── Pitches ─────────────────────────────────────
+        events = current.get("playEvents", [])
+        pitches = []
+        for ev in events:
+            if not ev.get("isPitch"):
+                continue
+            pd_ev = ev.get("pitchData", {})
+            coords = pd_ev.get("coordinates", {})
+            px = coords.get("pX")
+            pz = coords.get("pZ")
+            if px is None or pz is None:
+                continue
+            pitches.append({
+                "pX": px, "pZ": pz,
+                "type": ev.get("details", {}).get("type", {}).get("code", ""),
+                "description": ev.get("details", {}).get("description", ""),
+                "speed": ev.get("pitchNumber", 0),
+                "call": ev.get("details", {}).get("call", {}).get("description", ""),
+                "pitchType": ev.get("details", {}).get("type", {}).get("description", ""),
+                "speed_mph": pd_ev.get("startSpeed"),
+                "zone_top": pd_ev.get("strikeZoneTop", 3.4),
+                "zone_bot": pd_ev.get("strikeZoneBottom", 1.6),
+            })
+
+        # ── Batter intel ────────────────────────────────
+        batter_intel = None
+        if batter_id:
+            is_new = batter_id != _last_batter_id
+            _last_batter_id = batter_id
+
+            # Determine batter's team
+            bat_team = "away" if inning_half == "Top" else "home"
+            bp = boxscore.get("teams", {}).get(bat_team, {}).get("players", {}).get(f"ID{batter_id}", {})
+            season = bp.get("seasonStats", {}).get("batting", {})
+            today = bp.get("stats", {}).get("batting", {})
+
+            # vs pitcher (cached, non-blocking)
+            vs = None
+            cache_key = (batter_id, pitcher_id) if pitcher_id else None
+            if cache_key and cache_key in _batter_vs_pitcher_cache:
+                vs = _batter_vs_pitcher_cache[cache_key]
+            elif cache_key:
+                # Fire background fetch, return null this poll
+                async def _fetch_vs(bid, pid, key):
+                    try:
+                        vurl = (f"https://statsapi.mlb.com/api/v1/people/{bid}/stats"
+                                f"?stats=vsPlayer&opposingPlayerId={pid}&group=hitting")
+                        async with httpx.AsyncClient(timeout=6) as c:
+                            r = await c.get(vurl)
+                            if r.status_code == 200:
+                                splits = r.json().get("stats", [{}])[0].get("splits", [])
+                                if splits:
+                                    s = splits[0].get("stat", {})
+                                    _batter_vs_pitcher_cache[key] = {
+                                        "ab": s.get("atBats", 0), "h": s.get("hits", 0),
+                                        "hr": s.get("homeRuns", 0), "avg": s.get("avg", ".000"),
+                                    }
+                                else:
+                                    _batter_vs_pitcher_cache[key] = None
+                    except Exception:
+                        _batter_vs_pitcher_cache[key] = None
+                asyncio.create_task(_fetch_vs(batter_id, pitcher_id, cache_key))
+
+            batter_intel = {
+                "is_new": is_new,
+                "name": batter_name,
+                "season": {
+                    "avg": season.get("avg", ".000"), "obp": season.get("obp", ".000"),
+                    "slg": season.get("slg", ".000"), "hr": season.get("homeRuns", 0),
+                },
+                "today": {
+                    "ab": today.get("atBats", 0), "h": today.get("hits", 0),
+                    "hr": today.get("homeRuns", 0), "bb": today.get("baseOnBalls", 0),
+                },
+                "vs_pitcher": vs,
+            }
+
+        # ── Between-innings break data ──────────────────
+        break_data = None
+        if inning_state in ("Middle", "End"):
+            other_scores = await _fetch_other_scores()
+            due_up = _get_due_up(boxscore, inning_state)
+            pitcher_summary = _get_pitcher_summary(boxscore, linescore, inning_state)
+            # Game score for context
+            ls_teams = linescore.get("teams", {})
+            gd = data.get("gameData", {}).get("teams", {})
+            break_data = {
+                "active": True,
+                "other_scores": other_scores,
+                "due_up": due_up,
+                "pitcher": pitcher_summary,
+                "game_score": {
+                    "away": gd.get("away", {}).get("abbreviation", ""),
+                    "home": gd.get("home", {}).get("abbreviation", ""),
+                    "away_r": ls_teams.get("away", {}).get("runs", 0),
+                    "home_r": ls_teams.get("home", {}).get("runs", 0),
+                },
+                "inning": inning_str,
+            }
+
+        return {
+            "pitches": pitches,
+            "batter": batter_name,
+            "pitcher": pitcher_name,
+            "count": count_str,
+            "outs": outs,
+            "inning": inning_str,
+            "batter_intel": batter_intel,
+            "break_data": break_data,
+        }
+    except Exception:
+        log.exception("Failed to fetch pitch data")
+        return empty
+
+
+def _extract_pitcher_stats(team_data: dict) -> list[dict]:
+    pitchers = team_data.get("pitchers", [])
+    players = team_data.get("players", {})
+    result = []
+    for pid in pitchers:
+        pd = players.get(f"ID{pid}", {})
+        stats = pd.get("stats", {}).get("pitching", {})
+        if not stats:
+            continue
+        result.append({
+            "name": pd.get("person", {}).get("fullName", ""),
+            "ip": stats.get("inningsPitched", "0.0"),
+            "h": stats.get("hits", 0),
+            "r": stats.get("runs", 0),
+            "er": stats.get("earnedRuns", 0),
+            "bb": stats.get("baseOnBalls", 0),
+            "k": stats.get("strikeOuts", 0),
+            "pitches": stats.get("numberOfPitches", 0),
+        })
+    return result
+
+
+@app.get("/api/game/{game_id}/stats")
+async def get_game_stats(game_id: str):
+    """Return rich stats for a game: linescore, win probability, spray chart, scoring plays, pitchers."""
+    url = f"https://statsapi.mlb.com/api/v1.1/game/{game_id}/feed/live"
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, "MLB Stats API error")
+        data = resp.json()
+
+    game_data = data.get("gameData", {})
+    live = data.get("liveData", {})
+    linescore = live.get("linescore", {})
+    boxscore = live.get("boxscore", {})
+    plays = live.get("plays", {})
+
+    # Game info
+    teams_gd = game_data.get("teams", {})
+    info = {
+        "away_name": teams_gd.get("away", {}).get("name", ""),
+        "away_abbr": teams_gd.get("away", {}).get("abbreviation", ""),
+        "home_name": teams_gd.get("home", {}).get("name", ""),
+        "home_abbr": teams_gd.get("home", {}).get("abbreviation", ""),
+        "venue": game_data.get("venue", {}).get("name", ""),
+        "date": game_data.get("datetime", {}).get("originalDate", ""),
+        "status": game_data.get("status", {}).get("detailedState", ""),
+    }
+
+    # Linescore
+    innings = []
+    for inn in linescore.get("innings", []):
+        innings.append({
+            "num": inn.get("num", ""),
+            "away_r": inn.get("away", {}).get("runs", ""),
+            "away_h": inn.get("away", {}).get("hits", ""),
+            "away_e": inn.get("away", {}).get("errors", ""),
+            "home_r": inn.get("home", {}).get("runs", ""),
+            "home_h": inn.get("home", {}).get("hits", ""),
+            "home_e": inn.get("home", {}).get("errors", ""),
+        })
+    ls_teams = linescore.get("teams", {})
+    away_totals = {k: ls_teams.get("away", {}).get(k, 0) for k in ("runs", "hits", "errors", "leftOnBase")}
+    home_totals = {k: ls_teams.get("home", {}).get(k, 0) for k in ("runs", "hits", "errors", "leftOnBase")}
+
+    # Win probability per play
+    all_plays = plays.get("allPlays", [])
+    win_prob = []
+    for p in all_plays:
+        hwp = p.get("contextMetrics", {}).get("homeWinProbability")
+        ab = p.get("about", {}).get("atBatIndex")
+        if hwp is not None and ab is not None:
+            win_prob.append({"ab": ab, "hwp": round(hwp, 1)})
+
+    # Hit spray chart
+    hits = []
+    for p in all_plays:
+        event = p.get("result", {}).get("event", "")
+        if not event:
+            continue
+        hd = p.get("hitData", {})
+        coords = hd.get("coordinates", {})
+        cx = coords.get("coordX")
+        cy = coords.get("coordY")
+        if cx is None or cy is None:
+            continue
+        hits.append({
+            "x": cx,
+            "y": cy,
+            "event": event,
+            "batter": p.get("matchup", {}).get("batter", {}).get("fullName", ""),
+            "exitVelo": hd.get("launchSpeed"),
+            "angle": hd.get("launchAngle"),
+            "distance": hd.get("totalDistance"),
+        })
+
+    # Scoring plays
+    scoring_indices = plays.get("scoringPlays", [])
+    scoring_plays_out = []
+    for idx in scoring_indices:
+        if idx >= len(all_plays):
+            continue
+        p = all_plays[idx]
+        res = p.get("result", {})
+        about = p.get("about", {})
+        scoring_plays_out.append({
+            "inning": about.get("inning", ""),
+            "half": about.get("halfInning", ""),
+            "desc": res.get("description", ""),
+            "away": res.get("awayScore", 0),
+            "home": res.get("homeScore", 0),
+        })
+
+    # Pitcher and batting stats from boxscore
+    teams_bs = boxscore.get("teams", {})
+    away_pitchers = _extract_pitcher_stats(teams_bs.get("away", {}))
+    home_pitchers = _extract_pitcher_stats(teams_bs.get("home", {}))
+
+    def batting_totals(team_data):
+        s = team_data.get("teamStats", {}).get("batting", {})
+        return {k: s.get(k, 0) for k in ("atBats", "runs", "hits", "homeRuns", "strikeOuts", "baseOnBalls", "leftOnBase")}
+
+    return {
+        "info": info,
+        "linescore": {"innings": innings, "away": away_totals, "home": home_totals},
+        "win_prob": win_prob,
+        "hits": hits,
+        "scoring_plays": scoring_plays_out,
+        "away_pitchers": away_pitchers,
+        "home_pitchers": home_pitchers,
+        "away_batting": batting_totals(teams_bs.get("away", {})),
+        "home_batting": batting_totals(teams_bs.get("home", {})),
+    }
 
 
 @app.post("/api/reconnect")
@@ -477,6 +1306,8 @@ async def reconnect():
 async def get_status():
     return {
         "now_playing_game_id": _now_playing_game_id,
+        "now_playing_feed": _now_playing_feed,
+        "youtube_mode": _youtube_mode,
         "authenticated": _session.is_authenticated,
         "browser_running": _browser.is_running,
         "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
@@ -487,6 +1318,8 @@ async def get_status():
 async def get_stream():
     if not _stream_info:
         raise HTTPException(404, "No stream active")
+    if _stream_info.direct:
+        return {"url": _stream_info.url}
     # Return proxied URL to avoid CORS issues
     return {"url": "/hls/master.m3u8"}
 
@@ -537,6 +1370,39 @@ async def hls_proxy(path: str):
         ct = "application/vnd.apple.mpegurl"
 
     return Response(content=content, media_type=ct)
+
+
+# ── Player quality control ──────────────────────────────────────
+
+@app.post("/api/player/levels")
+async def post_player_levels(body: dict):
+    """Player reports available HLS quality levels after manifest parse."""
+    global _player_levels
+    _player_levels = body.get("levels", [])
+    return {"ok": True}
+
+
+@app.get("/api/player/levels")
+async def get_player_levels():
+    """Dashboard reads available quality levels for the current stream."""
+    return {"levels": _player_levels}
+
+
+@app.post("/api/player/command")
+async def post_player_command(body: dict):
+    """Dashboard sends a command to the player (e.g. quality change)."""
+    global _player_command
+    _player_command = body
+    return {"ok": True}
+
+
+@app.get("/api/player/command")
+async def get_player_command():
+    """Player polls for a pending command. Clears after read."""
+    global _player_command
+    cmd = _player_command
+    _player_command = None
+    return cmd or {}
 
 
 # ── Volume ──────────────────────────────────────────────────────
@@ -613,9 +1479,32 @@ async def set_favorites(body: dict):
 
 @app.get("/api/settings")
 async def get_settings():
+    overlay = _config.get("overlay", {})
+    sched = _config.scheduler
+    display = _config.display
     return {
+        # Account
+        "mlb_username": _config.mlb_username or "",
+        "mlb_authenticated": _session.is_authenticated,
+        # Playback
         "auto_start": _config.auto_start,
+        "default_feed": _config.get("providers", {}).get("mlb", {}).get("default_feed", "HOME"),
+        # Overlay
+        "strike_zone_enabled": overlay.get("strike_zone_enabled", True),
+        "strike_zone_size": overlay.get("strike_zone_size", "medium"),
+        "batter_intel_enabled": overlay.get("batter_intel_enabled", True),
+        "between_innings_enabled": overlay.get("between_innings_enabled", True),
+        # Display
+        "resolution": display.get("resolution", "1920x1080"),
+        "fullscreen": display.get("fullscreen", True),
+        # Scheduler
+        "poll_interval": sched.get("poll_interval", 60),
+        "pre_game_minutes": sched.get("pre_game_minutes", 5),
+        # CEC
         "cec_enabled": _config.cec.get("enabled", False),
+        "cec_power_off_on_stop": _config.cec.get("power_off_on_stop", True),
+        # YouTube channels
+        "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
     }
 
 
@@ -650,15 +1539,71 @@ async def set_autoplay(body: dict):
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
+    # Playback
     if "auto_start" in body:
         _config.update_nested("providers", "mlb", "auto_start", value=body["auto_start"])
+    if "default_feed" in body:
+        feed = body["default_feed"].upper() if body["default_feed"] in ("HOME", "AWAY") else "HOME"
+        _config.update_nested("providers", "mlb", "default_feed", value=feed)
+    # Overlay
+    if "strike_zone_enabled" in body:
+        _config.update_nested("overlay", "strike_zone_enabled", value=body["strike_zone_enabled"])
+    if "strike_zone_size" in body:
+        allowed = ("small", "medium", "large")
+        sz = body["strike_zone_size"] if body["strike_zone_size"] in allowed else "medium"
+        _config.update_nested("overlay", "strike_zone_size", value=sz)
+    if "batter_intel_enabled" in body:
+        _config.update_nested("overlay", "batter_intel_enabled", value=body["batter_intel_enabled"])
+    if "between_innings_enabled" in body:
+        _config.update_nested("overlay", "between_innings_enabled", value=body["between_innings_enabled"])
+    # Display
+    if "resolution" in body:
+        _config.update_nested("display", "resolution", value=body["resolution"])
+    if "fullscreen" in body:
+        _config.update_nested("display", "fullscreen", value=body["fullscreen"])
+    # Scheduler
+    if "poll_interval" in body:
+        val = max(15, min(300, int(body["poll_interval"])))
+        _config.update_nested("scheduler", "poll_interval", value=val)
+    if "pre_game_minutes" in body:
+        val = max(0, min(30, int(body["pre_game_minutes"])))
+        _config.update_nested("scheduler", "pre_game_minutes", value=val)
+    # CEC
     if "cec_enabled" in body:
         _config.update_nested("cec", "enabled", value=body["cec_enabled"])
         _cec._enabled = body["cec_enabled"]
+    if "cec_power_off_on_stop" in body:
+        _config.update_nested("cec", "power_off_on_stop", value=body["cec_power_off_on_stop"])
+    # YouTube channels
+    if "suggested_channels" in body:
+        SUGGESTED_CHANNELS.clear()
+        SUGGESTED_CHANNELS.update(body["suggested_channels"])
+        _config.update_nested("youtube", "suggested_channels", value=body["suggested_channels"])
     _config.save_user_config()
-    log.info("Settings updated: %s", body)
+    log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
     return await get_settings()
 
+
+@app.post("/api/settings/credentials")
+async def update_credentials(body: dict):
+    """Update MLB.TV credentials and re-authenticate."""
+    username = body.get("mlb_username", "").strip()
+    password = body.get("mlb_password", "").strip()
+    if not username or not password:
+        raise HTTPException(400, "Username and password are required")
+    _config.update_nested("providers", "mlb", "username", value=username)
+    _config.update_nested("providers", "mlb", "password", value=password)
+    _config.save_user_config()
+    ok = await _session.login(username, password)
+    if ok:
+        log.info("Credentials updated and login successful for %s", username)
+        return {"success": True, "authenticated": True}
+    else:
+        log.warning("Credentials updated but login failed for %s", username)
+        return {"success": False, "authenticated": False, "error": "Login failed — check username/password"}
+
+
+# ── Screen power ────────────────────────────────────────────────
 
 # ── CEC ─────────────────────────────────────────────────────────
 
@@ -711,6 +1656,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_json({
             "type": "status",
             "now_playing_game_id": _now_playing_game_id,
+            "youtube_mode": _youtube_mode,
             "authenticated": _session.is_authenticated,
             "browser_running": _browser.is_running,
             "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
@@ -738,6 +1684,12 @@ async def player_page():
 @app.get("/screensaver", response_class=HTMLResponse)
 async def screensaver_page():
     return _SCREENSAVER_HTML
+
+
+@app.get("/youtube", response_class=HTMLResponse)
+async def youtube_page():
+    return _YOUTUBE_HTML
+
 
 
 _STATIC_DIR = Path(__file__).parent / "static"

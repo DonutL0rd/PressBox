@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from playwright.async_api import async_playwright, Playwright, Browser, Page
@@ -123,6 +124,17 @@ class BrowserController:
             self._page = None
             return False
 
+    async def evaluate(self, expression: str):
+        """Run a JavaScript expression in the current page and return the result."""
+        page = self._page
+        if not page or page.is_closed():
+            return None
+        try:
+            return await page.evaluate(expression)
+        except Exception:
+            log.debug("evaluate failed: %s", expression[:100])
+            return None
+
     async def stop_playback(self) -> None:
         if self._page and not self._page.is_closed():
             try:
@@ -159,12 +171,13 @@ class BrowserController:
         return self._page
 
     async def _raise_window(self, page: Page) -> None:
-        """Try to bring Chrome to the foreground and make it fullscreen."""
+        """Bring Chrome to the foreground and make it fullscreen."""
         try:
             await page.bring_to_front()
         except Exception:
             pass
-        # Use CDP to set the window to fullscreen
+
+        # CDP: set the OS window to fullscreen
         if not self._fullscreened:
             try:
                 cdp = await page.context.new_cdp_session(page)
@@ -178,11 +191,51 @@ class BrowserController:
                 log.info("Set window to fullscreen via CDP")
             except Exception:
                 log.exception("CDP fullscreen failed")
-        # Fallback: JS Fullscreen API — Playwright bypasses the user-gesture requirement
+
+        # xdotool: raise Chrome to the top of the X11 window stack.
+        # bring_to_front() only promotes the tab within Chrome; it does not
+        # raise the Chrome window above the desktop in the window manager.
+        await self._xdotool_raise()
+
+        # JS Fullscreen API — Playwright bypasses the user-gesture requirement
         try:
             await page.evaluate(
                 "document.fullscreenElement || document.documentElement.requestFullscreen().catch(()=>{})"
             )
         except Exception:
             pass
+
+    async def _xdotool_raise(self) -> None:
+        """Find the Chrome/Chromium window via xdotool and raise it."""
+        env = {**os.environ}
+        for cls in ("Google-chrome", "google-chrome", "Chromium", "chromium"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "xdotool", "search", "--class", cls,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    env=env,
+                )
+                try:
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    continue
+                wids = stdout.decode().strip().splitlines()
+                if not wids:
+                    continue
+                wid = wids[-1]  # most recently opened window
+                for action in ("windowraise", "windowactivate"):
+                    p = await asyncio.create_subprocess_exec(
+                        "xdotool", action, wid,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        env=env,
+                    )
+                    await asyncio.wait_for(p.wait(), timeout=2)
+                log.info("xdotool raised Chrome window (wid=%s, class=%s)", wid, cls)
+                return
+            except Exception:
+                pass
+        log.debug("xdotool: no Chrome window found to raise")
 

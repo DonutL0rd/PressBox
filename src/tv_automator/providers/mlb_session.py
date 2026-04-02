@@ -58,6 +58,7 @@ class StreamInfo:
     heartbeat_url: str | None = None
     heartbeat_interval: int = 120  # seconds
     expiration: datetime | None = None  # when the stream URL expires
+    direct: bool = False  # if True, URL is public and served directly (no proxy)
 
 
 class MLBSession:

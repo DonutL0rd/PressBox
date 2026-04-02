@@ -161,13 +161,16 @@
 (function() {
   let favorites = new Set();
 
+  const TZ = 'America/Los_Angeles';
+
   function updateClock() {
     const now = new Date();
-    const h = now.getHours(), m = now.getMinutes();
+    const parts = now.toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true }).split(' ');
+    const timeParts = parts[0].split(':');
     document.getElementById('clock').textContent =
-      (h % 12 || 12) + ':' + String(m).padStart(2, '0');
+      timeParts[0] + ':' + timeParts[1];
     document.getElementById('clock-date').textContent =
-      now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      now.toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' });
   }
 
   function formatCountdown(ms) {

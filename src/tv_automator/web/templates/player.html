@@ -13,21 +13,210 @@
             display: none; z-index: 10; transition: opacity 0.3s; }
   .error { color: #ef4444; }
   .info  { color: #8b92b3; }
+
+  /* ── Shared overlay glass style ─────────────────── */
+  .overlay-glass {
+    position: fixed; top: 20px; right: 20px; z-index: 20;
+    width: 190px;
+    transform-origin: top right;
+    background: rgba(0,0,0,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 12px 12px 10px;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #e8e0d4;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: opacity 0.5s;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .overlay-glass.visible { opacity: 1; }
+  .overlay-glass.hidden { display: none; }
+
+  /* ── Strike zone overlay ──────────────────────── */
+  .sz-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px; padding: 0 2px;
+  }
+  .sz-count { font-size: 0.75rem; font-weight: 700; color: #d4915c; }
+  .sz-outs { font-size: 0.68rem; color: rgba(255,255,255,0.45); }
+  .sz-inning { font-size: 0.65rem; color: rgba(255,255,255,0.35); text-align: center; }
+
+  .sz-zone-wrap {
+    position: relative;
+    width: 140px; height: 160px;
+    margin: 0 auto 6px;
+  }
+
+  .sz-names {
+    text-align: center; padding: 0 2px;
+  }
+  .sz-pitcher { font-size: 0.68rem; color: rgba(255,255,255,0.5); }
+  .sz-batter { font-size: 0.72rem; font-weight: 600; color: #e8e0d4; }
+  .sz-vs { font-size: 0.55rem; color: rgba(255,255,255,0.3); margin: 0 3px; }
+
+  /* ── Batter intel card ───────────────────────── */
+  .bi-name { font-size: 0.88rem; font-weight: 700; color: #e8e0d4; margin-bottom: 8px; text-align: center; }
+  .bi-slash {
+    display: flex; justify-content: center; gap: 6px; margin-bottom: 8px;
+  }
+  .bi-stat-box {
+    text-align: center; background: rgba(255,255,255,0.06); border-radius: 6px; padding: 5px 8px; min-width: 44px;
+  }
+  .bi-stat-val { font-size: 0.9rem; font-weight: 700; color: #d4915c; }
+  .bi-stat-lbl { font-size: 0.52rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.05em; }
+  .bi-row { font-size: 0.68rem; color: rgba(255,255,255,0.55); text-align: center; margin-top: 4px; }
+  .bi-row span { color: #e8e0d4; font-weight: 600; }
+  .bi-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 6px 0; }
+
+  /* ── Between-innings break overlay ───────────── */
+  #break-overlay {
+    position: fixed; inset: 0; z-index: 30;
+    background: rgba(0,0,0,0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #e8e0d4;
+    transition: opacity 0.6s;
+    opacity: 0;
+    pointer-events: none;
+  }
+  #break-overlay.visible { opacity: 1; pointer-events: auto; }
+
+  .break-inner { max-width: 680px; width: 90%; }
+  .break-header {
+    text-align: center; margin-bottom: 28px;
+  }
+  .break-game-score {
+    font-size: 1.8rem; font-weight: 800; color: #d4915c;
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+  .break-game-score .sep { color: rgba(255,255,255,0.2); margin: 0 10px; }
+  .break-inning-label {
+    font-size: 0.82rem; color: rgba(255,255,255,0.4); margin-top: 4px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+
+  .break-section {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; padding: 18px 20px; margin-bottom: 16px;
+  }
+  .break-section-title {
+    font-size: 0.68rem; color: rgba(255,255,255,0.35); text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 600; margin-bottom: 12px;
+  }
+
+  /* Due up batters */
+  .due-up-row { display: flex; gap: 12px; justify-content: center; }
+  .due-up-card {
+    flex: 1; max-width: 180px; text-align: center;
+    background: rgba(255,255,255,0.04); border-radius: 10px; padding: 14px 10px;
+  }
+  .due-up-name { font-size: 0.82rem; font-weight: 700; color: #e8e0d4; margin-bottom: 6px; }
+  .due-up-stats { font-size: 0.72rem; color: rgba(255,255,255,0.5); }
+  .due-up-stats span { color: #d4915c; font-weight: 600; }
+
+  /* Other scores */
+  .other-scores-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .other-score {
+    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;
+    font-size: 0.75rem; white-space: nowrap;
+    display: flex; gap: 8px; align-items: center;
+  }
+  .other-score .teams { color: rgba(255,255,255,0.6); }
+  .other-score .score { color: #e8e0d4; font-weight: 700; }
+  .other-score .inn { color: rgba(255,255,255,0.3); font-size: 0.65rem; }
+  .other-score.live .inn { color: rgba(143,188,106,0.7); }
+
+  /* Pitcher summary */
+  .pitcher-summary { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .pitcher-summary-name { font-size: 0.88rem; font-weight: 700; color: #e8e0d4; }
+  .pitcher-summary-stats { display: flex; gap: 12px; font-size: 0.78rem; color: rgba(255,255,255,0.5); }
+  .pitcher-summary-stats span { color: #d4915c; font-weight: 600; }
 </style>
 </head>
 <body>
 <video id="video" autoplay></video>
 <div id="status"></div>
+
+<!-- Strike zone / batter intel overlay (same position, toggle between them) -->
+<div id="sz-overlay" class="overlay-glass">
+  <!-- Strike zone content -->
+  <div id="sz-content">
+    <div class="sz-header">
+      <span class="sz-count" id="sz-count"></span>
+      <span class="sz-inning" id="sz-inning"></span>
+      <span class="sz-outs" id="sz-outs"></span>
+    </div>
+    <div class="sz-zone-wrap">
+      <svg id="sz-svg" viewBox="0 0 140 160" width="140" height="160" xmlns="http://www.w3.org/2000/svg">
+        <rect id="sz-box" x="30" y="20" width="80" height="110" rx="2"
+              fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
+        <line x1="56.7" y1="20" x2="56.7" y2="130" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+        <line x1="83.3" y1="20" x2="83.3" y2="130" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+        <line x1="30" y1="56.7" x2="110" y2="56.7" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+        <line x1="30" y1="93.3" x2="110" y2="93.3" stroke="rgba(255,255,255,0.08)" stroke-width="0.5"/>
+        <polygon points="60,152 70,158 80,152 78,148 62,148" fill="rgba(255,255,255,0.15)"/>
+        <g id="sz-dots"></g>
+      </svg>
+    </div>
+    <div class="sz-names">
+      <span class="sz-pitcher" id="sz-pitcher"></span>
+      <span class="sz-vs">vs</span>
+      <span class="sz-batter" id="sz-batter"></span>
+    </div>
+  </div>
+  <!-- Batter intel card (shown briefly when new batter steps up) -->
+  <div id="bi-content" style="display:none">
+    <div class="bi-name" id="bi-name"></div>
+    <div class="bi-slash" id="bi-slash"></div>
+    <div class="bi-row" id="bi-today"></div>
+    <div class="bi-divider" id="bi-vs-divider" style="display:none"></div>
+    <div class="bi-row" id="bi-vs" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Between-innings break overlay -->
+<div id="break-overlay">
+  <div class="break-inner">
+    <div class="break-header">
+      <div class="break-game-score" id="break-score"></div>
+      <div class="break-inning-label" id="break-inning"></div>
+    </div>
+    <div class="break-section" id="break-due-up-section">
+      <div class="break-section-title">Due Up</div>
+      <div class="due-up-row" id="break-due-up"></div>
+    </div>
+    <div class="break-section" id="break-pitcher-section">
+      <div class="break-section-title">Pitching</div>
+      <div class="pitcher-summary" id="break-pitcher"></div>
+    </div>
+    <div class="break-section" id="break-scores-section" style="display:none">
+      <div class="break-section-title">Around the League</div>
+      <div class="other-scores-grid" id="break-other-scores"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/hls.min.js"></script>
 <script>
 (function() {
-  const video = document.getElementById('video');
-  const statusEl = document.getElementById('status');
-  let hls = null;
-  let retries = 0;
-  let reconnecting = false;
-  const MAX_RETRIES = 5;
-  const RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
+  var video = document.getElementById('video');
+  var statusEl = document.getElementById('status');
+  var hls = null;
+  var retries = 0;
+  var reconnecting = false;
+  var MAX_RETRIES = 5;
+  var RETRY_DELAYS = [3000, 5000, 10000, 20000, 30000];
+
+  // ── Mode flags (set once on load) ──────────────────
+  var isCondensed = false;
+  var szEnabled = true;
+  var batterIntelEnabled = true;
+  var breakOverlayEnabled = true;
+  var szSizeScale = { small: 0.65, medium: 1, large: 1.45 };
 
   function showStatus(msg, cls) {
     statusEl.textContent = msg;
@@ -36,16 +225,52 @@
   }
   function hideStatus() { statusEl.style.display = 'none'; }
 
+  // ── Init: check feed type and settings ─────────────
+  (async function init() {
+    // Check if condensed
+    try {
+      var sRes = await fetch('/api/status');
+      if (sRes.ok) {
+        var st = await sRes.json();
+        if (st.now_playing_feed === 'CONDENSED') isCondensed = true;
+      }
+    } catch(e) {}
+
+    // Load overlay settings
+    if (!isCondensed) {
+      try {
+        var res = await fetch('/api/settings');
+        if (res.ok) {
+          var data = await res.json();
+          szEnabled = data.strike_zone_enabled !== false;
+          batterIntelEnabled = data.batter_intel_enabled !== false;
+          breakOverlayEnabled = data.between_innings_enabled !== false;
+          var size = data.strike_zone_size || 'medium';
+          var scale = szSizeScale[size] || 1;
+          document.getElementById('sz-overlay').style.transform = 'scale(' + scale + ')';
+        }
+      } catch(e) {}
+    }
+
+    if (isCondensed || !szEnabled) {
+      document.getElementById('sz-overlay').classList.add('hidden');
+    }
+
+    // Start polling only for live games
+    if (!isCondensed && szEnabled) {
+      szPollTimer = setInterval(pollPitches, 6000);
+      setTimeout(pollPitches, 2000);
+    }
+  })();
+
+  // ── HLS player ─────────────────────────────────────
   async function loadStream() {
     try {
-      console.log('[player] Loading stream...');
-      const res = await fetch('/api/stream');
+      var res = await fetch('/api/stream');
       if (!res.ok) { showStatus('No stream available', 'error'); return; }
-      const { url } = await res.json();
-      console.log('[player] Got stream URL:', url.substring(0, 80));
-      startPlayer(url);
+      var d = await res.json();
+      startPlayer(d.url);
     } catch (e) {
-      console.error('[player] Load failed:', e);
       showStatus('Failed to load stream: ' + e.message, 'error');
       scheduleReconnect();
     }
@@ -53,92 +278,272 @@
 
   function startPlayer(url) {
     if (hls) { hls.destroy(); hls = null; }
-
     if (!Hls.isSupported()) {
       if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        video.play();
-        return;
+        video.src = url; video.play(); return;
       }
-      showStatus('HLS not supported', 'error');
-      return;
+      showStatus('HLS not supported', 'error'); return;
     }
-
     hls = new Hls({
-      maxBufferLength: 30,
-      maxMaxBufferLength: 120,
-      liveSyncDurationCount: 3,
-      liveMaxLatencyDurationCount: 6,
-      enableWorker: true,
+      maxBufferLength: 30, maxMaxBufferLength: 120,
+      liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6, enableWorker: true,
     });
     hls.loadSource(url);
     hls.attachMedia(video);
 
     hls.on(Hls.Events.MANIFEST_PARSED, function(_, data) {
-      console.log('[player] Manifest parsed, levels:', data.levels ? data.levels.length : 0);
-      video.play().then(function() {
-        console.log('[player] Playback started');
-      }).catch(function(e) {
-        console.error('[player] Play rejected:', e);
-      });
-      retries = 0;
-      hideStatus();
+      video.play().catch(function(){});
+      retries = 0; hideStatus();
+      if (data.levels && data.levels.length > 0) {
+        var levels = data.levels.map(function(l, i) {
+          return { index: i, height: l.height || 0, bitrate: l.bitrate || 0 };
+        });
+        fetch('/api/player/levels', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ levels: levels }),
+        }).catch(function() {});
+      }
     });
 
     hls.on(Hls.Events.ERROR, function(_, data) {
-      console.error('[player] HLS error:', data.type, data.details, 'fatal:', data.fatal, 'reason:', data.reason || '');
       if (!data.fatal) return;
-
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
         showStatus('Network error \u2014 reconnecting...', 'info');
         hls.startLoad();
-        setTimeout(function() {
-          if (hls && hls.media && hls.media.paused) {
-            scheduleReconnect();
-          }
-        }, 10000);
+        setTimeout(function() { if (hls && hls.media && hls.media.paused) scheduleReconnect(); }, 10000);
       } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        showStatus('Media error \u2014 recovering...', 'info');
-        hls.recoverMediaError();
+        showStatus('Media error \u2014 recovering...', 'info'); hls.recoverMediaError();
       } else {
-        showStatus('Fatal error \u2014 reconnecting...', 'error');
-        scheduleReconnect();
+        showStatus('Fatal error \u2014 reconnecting...', 'error'); scheduleReconnect();
       }
     });
   }
 
   async function scheduleReconnect() {
     if (reconnecting) return;
-    if (retries >= MAX_RETRIES) {
-      showStatus('Stream lost after ' + MAX_RETRIES + ' retries.', 'error');
-      return;
-    }
-    reconnecting = true;
-    retries++;
-    const delay = RETRY_DELAYS[Math.min(retries - 1, RETRY_DELAYS.length - 1)];
-    showStatus('Reconnecting (' + retries + '/' + MAX_RETRIES + ') in ' + (delay/1000) + 's...', 'info');
-    await new Promise(r => setTimeout(r, delay));
-
+    if (retries >= MAX_RETRIES) { showStatus('Stream lost.', 'error'); return; }
+    reconnecting = true; retries++;
+    var delay = RETRY_DELAYS[Math.min(retries - 1, RETRY_DELAYS.length - 1)];
+    showStatus('Reconnecting (' + retries + '/' + MAX_RETRIES + ')...', 'info');
+    await new Promise(function(r) { setTimeout(r, delay); });
     try {
-      showStatus('Getting fresh stream...', 'info');
-      const res = await fetch('/api/reconnect', { method: 'POST' });
+      var res = await fetch('/api/reconnect', { method: 'POST' });
       if (res.ok) {
-        const { url } = await fetch('/api/stream').then(r => r.json());
-        reconnecting = false;
-        startPlayer(url);
-      } else {
-        reconnecting = false;
-        showStatus('Reconnect failed \u2014 retrying...', 'error');
-        scheduleReconnect();
-      }
-    } catch (e) {
-      reconnecting = false;
-      showStatus('Reconnect error: ' + e.message, 'error');
-      scheduleReconnect();
-    }
+        var d = await fetch('/api/stream').then(function(r) { return r.json(); });
+        reconnecting = false; startPlayer(d.url);
+      } else { reconnecting = false; scheduleReconnect(); }
+    } catch (e) { reconnecting = false; scheduleReconnect(); }
   }
 
   loadStream();
+
+  // ── Player command polling ─────────────────────────
+  setInterval(function() {
+    fetch('/api/player/command').then(function(r) { return r.json(); }).then(function(cmd) {
+      if (cmd.action === 'quality' && hls) {
+        var lvl = parseInt(cmd.level);
+        hls.currentLevel = isNaN(lvl) ? -1 : lvl;
+      }
+    }).catch(function(){});
+  }, 3000);
+
+  // ── Strike zone + batter intel + break overlay ─────
+  var szOverlay = document.getElementById('sz-overlay');
+  var szContent = document.getElementById('sz-content');
+  var biContent = document.getElementById('bi-content');
+  var szDots = document.getElementById('sz-dots');
+  var breakOverlay = document.getElementById('break-overlay');
+  var szPollTimer = null;
+  var lastPitchCount = -1;
+  var currentBatterId = null;
+  var batterCardTimer = null;
+  var breakActive = false;
+
+  function shortName(name) {
+    if (!name) return '';
+    var p = name.split(' ');
+    return p.length < 2 ? name : p[0][0] + '. ' + p[p.length - 1];
+  }
+
+  function pxToSvgX(px) { return 10 + ((px + 1.5) / 3.0) * 120; }
+  function pzToSvgY(pz) { return 150 - ((pz - 0.5) / 4.0) * 140; }
+
+  function pitchColor(call) {
+    call = (call || '').toLowerCase();
+    if (call.indexOf('strike') >= 0 || call.indexOf('foul') >= 0 || call.indexOf('swinging') >= 0) return '#d4915c';
+    if (call.indexOf('ball') >= 0) return '#5b9bd5';
+    if (call.indexOf('in play') >= 0) return '#8fbc6a';
+    return 'rgba(255,255,255,0.5)';
+  }
+
+  // Show batter intel card, then fade back to strike zone
+  function showBatterCard(bi) {
+    if (!bi || isCondensed) return;
+    clearTimeout(batterCardTimer);
+
+    document.getElementById('bi-name').textContent = bi.name || '';
+    var s = bi.season || {};
+    document.getElementById('bi-slash').innerHTML =
+      '<div class="bi-stat-box"><div class="bi-stat-val">' + (s.avg || '.000') + '</div><div class="bi-stat-lbl">AVG</div></div>'
+      + '<div class="bi-stat-box"><div class="bi-stat-val">' + (s.obp || '.000') + '</div><div class="bi-stat-lbl">OBP</div></div>'
+      + '<div class="bi-stat-box"><div class="bi-stat-val">' + (s.slg || '.000') + '</div><div class="bi-stat-lbl">SLG</div></div>'
+      + '<div class="bi-stat-box"><div class="bi-stat-val">' + (s.hr || 0) + '</div><div class="bi-stat-lbl">HR</div></div>';
+
+    var t = bi.today || {};
+    var todayParts = [];
+    if (t.ab > 0 || t.h > 0) todayParts.push('<span>' + t.h + '-' + t.ab + '</span>');
+    if (t.hr > 0) todayParts.push('<span>' + t.hr + ' HR</span>');
+    if (t.bb > 0) todayParts.push('<span>' + t.bb + ' BB</span>');
+    document.getElementById('bi-today').innerHTML = todayParts.length
+      ? 'Today: ' + todayParts.join(', ')
+      : 'First AB';
+
+    var vsDivider = document.getElementById('bi-vs-divider');
+    var vsEl = document.getElementById('bi-vs');
+    if (bi.vs_pitcher && bi.vs_pitcher.ab > 0) {
+      vsDivider.style.display = ''; vsEl.style.display = '';
+      vsEl.innerHTML = 'vs Pitcher: <span>' + bi.vs_pitcher.h + '-' + bi.vs_pitcher.ab
+        + (bi.vs_pitcher.hr > 0 ? ', ' + bi.vs_pitcher.hr + ' HR' : '') + '</span>';
+    } else {
+      vsDivider.style.display = 'none'; vsEl.style.display = 'none';
+    }
+
+    szContent.style.display = 'none';
+    biContent.style.display = '';
+    szOverlay.classList.add('visible');
+
+    batterCardTimer = setTimeout(function() {
+      biContent.style.display = 'none';
+      szContent.style.display = '';
+    }, 8000);
+  }
+
+  // Show/hide between-innings break overlay
+  function updateBreakOverlay(bd) {
+    if (!bd || !bd.active) {
+      if (breakActive) {
+        breakOverlay.classList.remove('visible');
+        breakActive = false;
+        szOverlay.classList.add('visible');
+      }
+      return;
+    }
+    breakActive = true;
+    szOverlay.classList.remove('visible');
+
+    // Game score header
+    var gs = bd.game_score || {};
+    document.getElementById('break-score').innerHTML =
+      gs.away + ' <span class="sep">' + gs.away_r + ' - ' + gs.home_r + '</span> ' + gs.home;
+    document.getElementById('break-inning').textContent = 'Break \u2014 ' + (bd.inning || '');
+
+    // Due up
+    var due = bd.due_up || [];
+    if (due.length) {
+      document.getElementById('break-due-up-section').style.display = '';
+      document.getElementById('break-due-up').innerHTML = due.map(function(b) {
+        return '<div class="due-up-card"><div class="due-up-name">' + shortName(b.name) + '</div>'
+          + '<div class="due-up-stats"><span>' + b.avg + '</span> AVG &middot; <span>' + b.hr + '</span> HR</div></div>';
+      }).join('');
+    } else {
+      document.getElementById('break-due-up-section').style.display = 'none';
+    }
+
+    // Pitcher summary
+    var p = bd.pitcher;
+    if (p) {
+      document.getElementById('break-pitcher-section').style.display = '';
+      document.getElementById('break-pitcher').innerHTML =
+        '<div class="pitcher-summary-name">' + shortName(p.name) + '</div>'
+        + '<div class="pitcher-summary-stats">'
+        + '<span>' + p.ip + '</span> IP &middot; '
+        + '<span>' + p.pitches + '</span> pitches &middot; '
+        + '<span>' + p.k + '</span> K &middot; '
+        + '<span>' + p.h + '</span> H &middot; '
+        + '<span>' + p.er + '</span> ER'
+        + '</div>';
+    } else {
+      document.getElementById('break-pitcher-section').style.display = 'none';
+    }
+
+    // Other scores
+    var scores = bd.other_scores || [];
+    var liveScores = scores.filter(function(s) { return s.state && s.state.toLowerCase().indexOf('progress') >= 0; });
+    var secEl = document.getElementById('break-scores-section');
+    if (liveScores.length) {
+      secEl.style.display = '';
+      document.getElementById('break-other-scores').innerHTML = liveScores.map(function(s) {
+        return '<div class="other-score live">'
+          + '<span class="teams">' + s.away + ' @ ' + s.home + '</span>'
+          + '<span class="score">' + s.away_score + '-' + s.home_score + '</span>'
+          + '<span class="inn">' + s.inning + '</span>'
+          + '</div>';
+      }).join('');
+    } else {
+      secEl.style.display = 'none';
+    }
+
+    breakOverlay.classList.add('visible');
+  }
+
+  async function pollPitches() {
+    if (isCondensed || !szEnabled) return;
+    try {
+      var res = await fetch('/api/pitches');
+      if (!res.ok) return;
+      var data = await res.json();
+
+      // Between-innings break
+      if (breakOverlayEnabled) updateBreakOverlay(data.break_data);
+      else updateBreakOverlay(null);
+      if (breakActive) return;  // don't update strike zone during break
+
+      // Batter intel flash
+      if (batterIntelEnabled && data.batter_intel && data.batter_intel.is_new) {
+        showBatterCard(data.batter_intel);
+      }
+
+      if (!data.pitcher && !data.batter) {
+        szOverlay.classList.remove('visible');
+        return;
+      }
+      // Only update strike zone when it's visible (not during batter card)
+      if (biContent.style.display !== 'none') return;
+      szOverlay.classList.add('visible');
+
+      document.getElementById('sz-count').textContent = data.count || '';
+      document.getElementById('sz-inning').textContent = data.inning || '';
+      var outsText = '';
+      for (var i = 0; i < 3; i++) outsText += i < data.outs ? '\u25CF' : '\u25CB';
+      document.getElementById('sz-outs').textContent = outsText;
+      document.getElementById('sz-pitcher').textContent = shortName(data.pitcher);
+      document.getElementById('sz-batter').textContent = shortName(data.batter);
+
+      if (data.pitches.length !== lastPitchCount) {
+        lastPitchCount = data.pitches.length;
+        var svg = '';
+        for (var j = 0; j < data.pitches.length; j++) {
+          var p = data.pitches[j];
+          var cx = pxToSvgX(p.pX);
+          var cy = pzToSvgY(p.pZ);
+          var color = pitchColor(p.call);
+          var isLast = j === data.pitches.length - 1;
+          var r = isLast ? 6 : 4.5;
+          var opacity = isLast ? 1 : 0.55 + (j / data.pitches.length) * 0.35;
+          svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" '
+            + 'fill="' + color + '" opacity="' + opacity.toFixed(2) + '" '
+            + 'stroke="' + (isLast ? 'rgba(255,255,255,0.6)' : 'none') + '" stroke-width="' + (isLast ? 1.5 : 0) + '"/>';
+          if (isLast && p.speed_mph) {
+            svg += '<text x="' + cx.toFixed(1) + '" y="' + (cy - 9).toFixed(1) + '" '
+              + 'text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="8" font-weight="600">'
+              + Math.round(p.speed_mph) + '</text>';
+          }
+        }
+        szDots.innerHTML = svg;
+      }
+    } catch(e) {}
+  }
+
 })();
 </script>
 </body>

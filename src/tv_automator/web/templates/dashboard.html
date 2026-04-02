@@ -4,204 +4,631 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TV Automator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d2e;
-      --card: #1e2235;
-      --border: #2d3148;
-      --text: #e8eaf6;
-      --muted: #8b92b3;
-      --accent: #4f7dff;
-      --green: #22c55e;
-      --red: #ef4444;
-      --yellow: #f59e0b;
+      --bg: #1a120b;
+      --surface: #2c1e14;
+      --card: #3b2a1a;
+      --border: #4d3a28;
+      --border-light: #5e4a36;
+      --text: #f5e6d3;
+      --muted: #a89278;
+      --accent: #d4915c;
+      --accent-hover: #e0a06e;
+      --accent-glow: rgba(212, 145, 92, 0.15);
+      --green: #8fbc6a;
+      --red: #d95555;
+      --yellow: #e0a832;
+      --cream: #f5e6d3;
+      --espresso: #2c1e14;
+      --font-display: 'Playfair Display', Georgia, serif;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: var(--font-body);
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      display: flex;
+      overflow: hidden;
     }
 
-    header {
+    /* ── Sidebar ──────────────────────────────────────── */
+    .sidebar {
+      width: 220px;
+      min-width: 220px;
       background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .sidebar-brand {
+      padding: 24px 20px 20px;
       border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
       display: flex;
       align-items: center;
-      gap: 16px;
-      flex-wrap: wrap;
+      gap: 12px;
     }
 
-    header h1 { font-size: 1.3rem; font-weight: 700; white-space: nowrap; }
+    .brand-icon {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+
+    /* Coffee cup SVG */
+    .coffee-cup {
+      width: 40px;
+      height: 40px;
+    }
+
+    /* Steam animation */
+    .steam-container {
+      position: absolute;
+      top: -14px;
+      left: 8px;
+      width: 24px;
+      height: 18px;
+      overflow: hidden;
+    }
+
+    .steam {
+      position: absolute;
+      bottom: 0;
+      width: 4px;
+      border-radius: 50%;
+      background: rgba(212, 145, 92, 0.3);
+      animation: steam-rise 2.2s ease-out infinite;
+      opacity: 0;
+    }
+
+    .steam:nth-child(1) { left: 3px; animation-delay: 0s; height: 10px; }
+    .steam:nth-child(2) { left: 10px; animation-delay: 0.6s; height: 14px; }
+    .steam:nth-child(3) { left: 17px; animation-delay: 1.1s; height: 10px; }
+
+    @keyframes steam-rise {
+      0%   { transform: translateY(0) scaleX(1); opacity: 0; }
+      15%  { opacity: 0.6; }
+      50%  { transform: translateY(-12px) scaleX(1.6); opacity: 0.3; }
+      100% { transform: translateY(-22px) scaleX(2); opacity: 0; }
+    }
+
+    .brand-text h1 {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--cream);
+      line-height: 1.15;
+    }
+
+    .brand-text .brand-sub {
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-top: 2px;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 12px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 500;
+      transition: all 0.15s;
+      border-left: 3px solid transparent;
+      user-select: none;
+      border-radius: 0 8px 8px 0;
+      margin-right: 8px;
+    }
+
+    .nav-item:hover {
+      color: var(--text);
+      background: rgba(212, 145, 92, 0.06);
+    }
+
+    .nav-item.active {
+      color: var(--accent);
+      background: var(--accent-glow);
+      border-left-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .nav-icon {
+      font-size: 1.15rem;
+      width: 22px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .sidebar-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .sidebar-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+    }
+
+    .ws-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--border-light);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .ws-dot.connected { background: var(--green); box-shadow: 0 0 6px rgba(143, 188, 106, 0.4); }
+
+    .auth-badge {
+      font-size: 0.72rem; font-weight: 600; padding: 3px 10px;
+      border-radius: 20px; white-space: nowrap;
+    }
+    .auth-ok  { background: rgba(143,188,106,0.12); color: var(--green); border: 1px solid rgba(143,188,106,0.25); }
+    .auth-no  { background: rgba(217,85,85,0.10); color: var(--red); border: 1px solid rgba(217,85,85,0.2); }
+
+    /* ── Main content area ─────────────────────────────── */
+    .main-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .top-bar {
+      background: var(--surface);
+      border-bottom: none;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-height: 52px;
+      z-index: 5;
+    }
 
     #now-playing-bar {
-      flex: 1; font-size: 0.88rem; color: var(--green);
+      flex: 1; font-size: 0.85rem; color: var(--green);
       font-weight: 600; display: none;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      background: rgba(143,188,106,0.08); padding: 5px 14px; border-radius: 8px;
+      border: 1px solid rgba(143,188,106,0.15);
     }
 
-    .controls {
-      display: flex; align-items: center; gap: 10px;
+    .top-controls {
+      display: flex; align-items: center; gap: 8px;
       margin-left: auto; flex-wrap: wrap;
     }
 
-    .date-nav { display: flex; align-items: center; gap: 8px; }
-    .date-nav span { min-width: 220px; text-align: center; font-size: 0.9rem; font-weight: 600; }
+    .volume-control {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 5px 12px;
+    }
+    .volume-control input[type=range] {
+      width: 80px; height: 4px; accent-color: var(--accent); cursor: pointer;
+    }
+    .volume-control .vol-pct { font-size: 0.75rem; color: var(--muted); min-width: 28px; text-align: right; }
+    .btn-mute { background: none; border: none; color: var(--muted); font-size: 1.1rem;
+                padding: 2px 6px; cursor: pointer; line-height: 1; }
+    .btn-mute:hover { color: var(--text); background: none; }
+    .btn-mute.muted { color: var(--red); }
 
+    .quality-control {
+      display: none; align-items: center; gap: 4px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 5px 10px;
+    }
+    .quality-control.visible { display: flex; }
+    .quality-label { font-size: 0.72rem; color: var(--muted); margin-right: 3px; white-space: nowrap; }
+    .quality-pill {
+      font-size: 0.72rem; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+      background: var(--border); color: var(--muted); border: none; cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .quality-pill:hover { background: var(--border-light); color: var(--text); }
+    .quality-pill.active { background: var(--accent); color: #1a120b; }
+
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      scroll-behavior: smooth;
+    }
+
+    /* Scrollbar styling */
+    .main-content::-webkit-scrollbar { width: 8px; }
+    .main-content::-webkit-scrollbar-track { background: var(--bg); }
+    .main-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    .main-content::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+    /* ── Tab panels ────────────────────────────────────── */
+    .tab-panel {
+      display: none;
+      max-width: 1280px;
+      margin: 0 auto;
+      width: 100%;
+      animation: fadeIn 0.2s ease;
+    }
+    .tab-panel.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Section headers ──────────────────────────────── */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--cream);
+    }
+
+    .section-divider {
+      width: 40px;
+      height: 3px;
+      background: var(--accent);
+      border-radius: 2px;
+      margin-top: 4px;
+    }
+
+    /* ── Buttons ──────────────────────────────────────── */
     button {
       background: var(--card); border: 1px solid var(--border); color: var(--text);
-      padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
-      line-height: 1.4; transition: background 0.12s;
+      padding: 7px 14px; border-radius: 10px; cursor: pointer; font-size: 0.82rem;
+      font-family: var(--font-body);
+      line-height: 1.4; transition: all 0.15s;
     }
-    button:hover { background: var(--border); }
+    button:hover { background: var(--border); border-color: var(--border-light); }
+    button:active { transform: scale(0.97); }
 
-    .btn-stop { background: var(--red); border-color: #c53030; color: #fff; }
-    .btn-stop:hover { background: #c53030; }
+    .btn-stop { background: var(--red); border-color: #b84040; color: #fff; font-weight: 600; }
+    .btn-stop:hover { background: #c04545; }
+
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #1a120b; font-weight: 600; }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+    .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted);
+                font-size: 1.05rem; padding: 5px 10px; border-radius: 10px; cursor: pointer; line-height: 1; }
+    .btn-icon:hover { color: var(--text); background: var(--card); }
+
+    .btn-screensaver {
+      background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+      padding: 7px 14px; border-radius: 10px; cursor: pointer; font-size: 0.82rem; line-height: 1.4;
+    }
+    .btn-screensaver:hover { background: var(--border); color: var(--text); }
 
     .btn-feed {
-      padding: 6px 12px; font-size: 0.78rem; font-weight: 600;
-      border-radius: 5px; cursor: pointer; transition: background 0.12s;
+      padding: 8px 16px; font-size: 0.82rem; font-weight: 600;
+      border-radius: 8px; cursor: pointer; transition: all 0.12s;
     }
-    .btn-home { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-home:hover { background: #3b6ae8; }
-    .btn-away { background: var(--card); border-color: var(--border); color: var(--text); }
-    .btn-away:hover { background: var(--border); }
+    .btn-home { background: var(--accent); border-color: var(--accent); color: #1a120b; }
+    .btn-home:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn-away { background: var(--surface); border-color: var(--border); color: var(--text); }
+    .btn-away:hover { background: var(--border); transform: translateY(-1px); }
     .btn-feed:disabled { background: var(--border); border-color: var(--border); color: var(--muted); cursor: default; }
 
-    .auth-badge {
-      font-size: 0.78rem; font-weight: 600; padding: 3px 10px;
-      border-radius: 20px; white-space: nowrap;
-    }
-    .auth-ok  { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-    .auth-no  { background: rgba(239,68,68,0.12); color: var(--red);   border: 1px solid rgba(239,68,68,0.25); }
+    /* ── Date nav ─────────────────────────────────────── */
+    .date-nav { display: flex; align-items: center; gap: 8px; }
+    .date-nav span { min-width: 220px; text-align: center; font-size: 0.88rem; font-weight: 600; }
 
-    main { padding: 24px; max-width: 1280px; margin: 0 auto; }
-
+    /* ── Game grid ─────────────────────────────────────── */
     #status-msg {
       text-align: center; color: var(--muted); padding: 60px 24px; font-size: 1rem;
     }
 
     #game-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;
     }
 
     .game-card {
-      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 10px;
-      position: relative; transition: border-color 0.15s;
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px;
+      padding: 20px 20px 16px; display: flex; flex-direction: column; gap: 10px;
+      position: relative; transition: all 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
-    .game-card.live { border-color: var(--green); }
-    .game-card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .game-card:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
+    .game-card.live { border-color: rgba(143,188,106,0.5); box-shadow: 0 2px 12px rgba(143,188,106,0.08); }
+    .game-card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 6px 24px rgba(212,145,92,0.12); }
     .game-card.favorite { border-left: 3px solid var(--accent); }
 
     .status-badge {
-      position: absolute; top: 12px; right: 12px; padding: 2px 9px; border-radius: 20px;
-      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+      position: absolute; top: 12px; right: 12px; padding: 3px 10px; border-radius: 20px;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     }
-    .badge-live     { background: var(--green); color: #000; }
-    .badge-pre_game { background: var(--yellow); color: #000; }
-    .badge-scheduled { background: var(--border); color: var(--muted); }
-    .badge-final    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .badge-live     { background: var(--green); color: #1a120b; }
+    .badge-pre_game { background: var(--yellow); color: #1a120b; }
+    .badge-scheduled { background: rgba(77,58,40,0.6); color: var(--muted); }
+    .badge-final    { background: rgba(77,58,40,0.4); color: var(--muted); }
     .badge-postponed, .badge-cancelled { background: var(--red); color: #fff; }
     .badge-unknown  { background: var(--border); color: var(--muted); }
 
     .matchup {
       display: flex; justify-content: space-between; align-items: center;
-      padding: 6px 0 4px; gap: 8px;
+      padding: 8px 0 6px; gap: 8px;
     }
     .team { flex: 1; text-align: center; }
-    .team-abbr { font-size: 1.9rem; font-weight: 800; line-height: 1; }
+    .team-abbr { font-family: var(--font-display); font-size: 2rem; font-weight: 800; line-height: 1; }
     .team-abbr.fav { color: var(--accent); }
     .team-name {
-      font-size: 0.68rem; color: var(--muted); margin-top: 3px;
+      font-size: 0.72rem; color: var(--muted); margin-top: 4px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
     .middle-col { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; }
-    .score-row { display: flex; align-items: center; gap: 10px; }
-    .score-val { font-size: 1.8rem; font-weight: 800; line-height: 1; }
-    .score-sep { color: var(--muted); font-size: 1rem; }
-    .at-sign { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
-    .inning-label { font-size: 0.75rem; color: var(--green); font-weight: 600; white-space: nowrap; }
+    .score-row { display: flex; align-items: center; gap: 12px; }
+    .score-val { font-family: var(--font-display); font-size: 2rem; font-weight: 800; line-height: 1; }
+    .score-sep { color: var(--border-light); font-size: 1rem; }
+    .at-sign { color: var(--border-light); font-size: 0.9rem; font-weight: 600; }
+    .inning-label { font-size: 0.78rem; color: var(--green); font-weight: 700; white-space: nowrap; }
 
     .pitchers {
-      font-size: 0.72rem; color: var(--muted);
+      font-size: 0.75rem; color: var(--muted);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
-    .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 4px; }
-    .game-time { font-size: 0.82rem; color: var(--muted); }
-    .feed-btns { display: flex; gap: 6px; }
-    .now-playing-tag { font-size: 0.8rem; color: var(--accent); font-weight: 600; }
-
-    .volume-control {
-      display: flex; align-items: center; gap: 6px;
-      background: var(--card); border: 1px solid var(--border); border-radius: 6px;
-      padding: 4px 10px;
+    .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 6px; }
+    .game-time { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
+    .feed-btns { display: flex; gap: 8px; }
+    .now-playing-tag {
+      font-size: 0.82rem; color: var(--accent); font-weight: 700;
+      background: rgba(212,145,92,0.1); padding: 6px 14px; border-radius: 8px;
     }
-    .volume-control input[type=range] {
-      width: 90px; height: 4px; accent-color: var(--accent); cursor: pointer;
-    }
-    .volume-control .vol-pct { font-size: 0.75rem; color: var(--muted); min-width: 28px; text-align: right; }
-    .btn-mute { background: none; border: none; color: var(--muted); font-size: 1rem;
-                padding: 2px 4px; cursor: pointer; line-height: 1; }
-    .btn-mute:hover { color: var(--text); background: none; }
-    .btn-mute.muted { color: var(--red); }
-
-    .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted);
-                font-size: 1rem; padding: 4px 8px; border-radius: 6px; cursor: pointer; line-height: 1; }
-    .btn-icon:hover { color: var(--text); background: var(--card); }
 
     .autoplay-row {
-      display: flex; align-items: center; gap: 6px;
-      padding-top: 8px; border-top: 1px solid var(--border); margin-top: 2px;
+      display: flex; align-items: center; gap: 8px;
+      padding-top: 10px; margin-top: 4px;
     }
-    .autoplay-row-label { font-size: 0.72rem; color: var(--muted); flex: 1; }
+    .autoplay-row-label { font-size: 0.75rem; color: var(--muted); flex: 1; }
     .btn-autoplay {
-      padding: 4px 11px; font-size: 0.75rem; font-weight: 600;
-      border-radius: 5px; cursor: pointer; transition: all 0.12s;
-      background: var(--card); border: 1px solid var(--border); color: var(--muted);
+      padding: 5px 12px; font-size: 0.75rem; font-weight: 600;
+      border-radius: 8px; cursor: pointer; transition: all 0.12s;
+      background: var(--bg); border: 1px solid var(--border); color: var(--muted);
     }
     .btn-autoplay:hover { border-color: var(--accent); color: var(--text); }
-    .btn-autoplay.active { background: rgba(79,125,255,0.15); border-color: var(--accent); color: var(--accent); }
+    .btn-autoplay.active { background: rgba(212,145,92,0.15); border-color: var(--accent); color: var(--accent); }
     .badge-autoplay {
       position: absolute; top: 12px; left: 12px; padding: 2px 8px; border-radius: 20px;
       font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-      background: rgba(79,125,255,0.2); color: var(--accent); border: 1px solid rgba(79,125,255,0.35);
+      background: rgba(212,145,92,0.15); color: var(--accent); border: 1px solid rgba(212,145,92,0.3);
     }
 
-    /* ── Settings Modal ────────────────────────────── */
-    .modal-overlay {
-      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-      z-index: 100; align-items: center; justify-content: center;
+    /* ── YouTube section ──────────────────────────────── */
+    .yt-section {
+      display: flex; gap: 10px; align-items: center; margin-bottom: 20px;
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 14px; padding: 16px 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-      padding: 28px; max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto;
+    .yt-label { font-size: 0.85rem; color: var(--muted); white-space: nowrap; font-weight: 500; }
+    .yt-input {
+      flex: 1; padding: 8px 14px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; font-size: 0.88rem; outline: none;
+      font-family: var(--font-body);
+      transition: border-color 0.15s;
     }
-    .modal h2 { font-size: 1.1rem; margin-bottom: 18px; }
-    .modal-section { margin-bottom: 20px; }
-    .modal-section h3 { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px;
-                        text-transform: uppercase; letter-spacing: 0.05em; }
+    .yt-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(212,145,92,0.1); }
+    .yt-input::placeholder { color: var(--muted); }
+    .btn-yt {
+      background: var(--accent); border: none; color: #1a120b; padding: 8px 18px;
+      border-radius: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 700;
+      white-space: nowrap; transition: background 0.15s;
+      font-family: var(--font-body);
+    }
+    .btn-yt:hover { background: var(--accent-hover); }
+    .yt-playing-tag { font-size: 0.82rem; color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+    /* YouTube controls panel */
+    .yt-controls {
+      display: none; flex-direction: column; gap: 10px;
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 14px;
+      padding: 16px 18px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .yt-controls.active { display: flex; }
+    .yt-controls-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .yt-transport { display: flex; gap: 6px; align-items: center; }
+    .btn-yt-ctrl {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; cursor: pointer; font-size: 1.1rem; width: 38px; height: 32px;
+      display: flex; align-items: center; justify-content: center; line-height: 1;
+      transition: all 0.12s;
+    }
+    .btn-yt-ctrl:hover { background: var(--border); border-color: var(--border-light); }
+    .btn-cc {
+      background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: 700;
+      padding: 0 8px; height: 32px; letter-spacing: 0.05em;
+      transition: all 0.15s;
+    }
+    .btn-cc:hover { color: var(--text); background: var(--border); }
+    .btn-cc.active { background: rgba(212,145,92,0.15); border-color: var(--accent); color: var(--accent); }
+
+    /* Speed pill selector */
+    .speed-pills {
+      display: flex; gap: 3px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 3px;
+    }
+    .speed-pill {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      padding: 3px 8px; border-radius: 5px; font-size: 0.72rem; font-weight: 600;
+      transition: all 0.12s; white-space: nowrap;
+      font-family: var(--font-body);
+    }
+    .speed-pill:hover { color: var(--text); background: var(--border); }
+    .speed-pill.active { background: var(--accent); color: #1a120b; }
+
+    .yt-time { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+    .yt-time-sep { font-size: 0.75rem; color: var(--border); }
+    .yt-vol-row { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+    .yt-vol-row label { font-size: 0.78rem; color: var(--muted); }
+    .yt-vol-row input[type=range] { width: 80px; accent-color: var(--accent); cursor: pointer; }
+    .yt-seek-row { display: flex; align-items: center; gap: 8px; }
+    .yt-seek-row input[type=range] {
+      flex: 1; accent-color: var(--accent); cursor: pointer; height: 4px;
+    }
+
+    /* ── Suggested videos ────────────────────────────── */
+    .suggested-section { margin-top: 24px; }
+    .suggested-section h3 {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--cream);
+      margin-bottom: 16px;
+    }
+    .suggested-channel {
+      margin-bottom: 20px;
+    }
+    .suggested-channel-name {
+      font-size: 0.82rem; font-weight: 600; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 10px; padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .suggested-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+    }
+    .suggested-card {
+      background: var(--card); border: 1px solid rgba(77,58,40,0.3); border-radius: 12px;
+      overflow: hidden; cursor: pointer; transition: all 0.2s;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .suggested-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+    .suggested-thumb {
+      width: 100%; aspect-ratio: 16/9; object-fit: cover;
+      background: var(--border); display: block;
+    }
+    .suggested-info { padding: 10px 12px; }
+    .suggested-title {
+      font-size: 0.82rem; font-weight: 600; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; margin-bottom: 4px;
+    }
+    .suggested-meta {
+      font-size: 0.7rem; color: var(--muted);
+    }
+    .suggested-loading {
+      text-align: center; color: var(--muted); padding: 30px;
+      font-size: 0.88rem;
+    }
+
+    /* ── Watch history ────────────────────────────────── */
+    .yt-history {
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px;
+      overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .yt-history-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; cursor: pointer; user-select: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .yt-history-header h3 { font-size: 0.85rem; font-weight: 600; color: var(--muted);
+                             text-transform: uppercase; letter-spacing: 0.06em; }
+    .yt-history-header .yt-history-count { font-size: 0.75rem; color: var(--muted); }
+    .yt-history-list { max-height: 500px; overflow-y: auto; }
+    .yt-history-empty { padding: 20px; text-align: center; color: var(--muted); font-size: 0.85rem; }
+
+    .yt-hist-item {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); transition: background 0.1s;
+    }
+    .yt-hist-item:last-child { border-bottom: none; }
+    .yt-hist-item:hover { background: rgba(212,145,92,0.04); }
+
+    .yt-hist-thumb {
+      width: 96px; height: 54px; object-fit: cover; border-radius: 6px;
+      background: var(--border); flex-shrink: 0;
+    }
+    .yt-hist-info { flex: 1; min-width: 0; }
+    .yt-hist-title {
+      font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px;
+    }
+    .yt-hist-channel { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; }
+    .yt-hist-progress-bar {
+      height: 3px; background: var(--border); border-radius: 2px; margin-bottom: 6px;
+    }
+    .yt-hist-progress-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+    .yt-hist-progress-fill.done { background: var(--green); }
+    .yt-hist-meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 6px; }
+    .yt-hist-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .btn-yt-hist {
+      padding: 3px 10px; font-size: 0.75rem; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      transition: all 0.1s; font-family: var(--font-body);
+    }
+    .btn-yt-hist:hover { background: var(--border); }
+    .btn-yt-hist.resume { border-color: var(--accent); color: var(--accent); }
+    .btn-yt-hist.resume:hover { background: rgba(212,145,92,0.1); }
+    .btn-yt-hist.del { color: var(--muted); }
+    .btn-yt-hist.del:hover { color: var(--red); border-color: var(--red); background: rgba(217,85,85,0.08); }
+
+    /* ── Settings panel ──────────────────────────────── */
+    .settings-section {
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px;
+      padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .settings-section h3 {
+      font-size: 0.85rem; color: var(--muted); margin-bottom: 14px;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
     .team-chips {
       display: flex; flex-wrap: wrap; gap: 6px;
     }
     .team-chip {
       padding: 5px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;
-      cursor: pointer; border: 1px solid var(--border); background: var(--card);
+      cursor: pointer; border: 1px solid var(--border); background: var(--bg);
       color: var(--muted); transition: all 0.12s; user-select: none;
     }
-    .team-chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .team-chip.selected { background: var(--accent); border-color: var(--accent); color: #1a120b; }
     .team-chip:hover { border-color: var(--accent); }
 
     .toggle-row {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 0; border-bottom: 1px solid var(--border);
+      padding: 12px 0; border-bottom: 1px solid var(--border);
     }
     .toggle-row:last-child { border-bottom: none; }
     .toggle-label { font-size: 0.88rem; }
@@ -221,107 +648,713 @@
     .toggle input:checked + .slider { background: var(--accent); }
     .toggle input:checked + .slider::before { transform: translateX(20px); }
 
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 8px 20px; }
-    .btn-primary:hover { background: #3b6ae8; }
-
-    /* ── WS indicator ──────────────────────────────── */
-    .ws-dot {
-      width: 8px; height: 8px; border-radius: 50%; display: inline-block;
-      background: var(--border); margin-right: 4px; vertical-align: middle;
+    .size-pills {
+      display: flex; gap: 3px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 3px;
     }
-    .ws-dot.connected { background: var(--green); }
+    .size-pill {
+      background: none; border: none; color: var(--muted); cursor: pointer;
+      padding: 4px 12px; border-radius: 5px; font-size: 0.78rem; font-weight: 600;
+      transition: all 0.12s; font-family: var(--font-body);
+    }
+    .size-pill:hover { color: var(--text); background: var(--border); }
+    .size-pill.active { background: var(--accent); color: #1a120b; }
 
-    /* ── Mobile responsive ─────────────────────────── */
-    @media (max-width: 900px) {
+    .settings-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+    /* Settings form elements */
+    .settings-input-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px;
+    }
+    .settings-input-row:last-child { border-bottom: none; }
+    .settings-input {
+      width: 220px; padding: 7px 12px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; font-size: 0.85rem; font-family: var(--font-body);
+      outline: none; transition: border-color 0.15s;
+    }
+    .settings-input:focus { border-color: var(--accent); }
+    .settings-input::placeholder { color: var(--border-light); }
+    .settings-select {
+      padding: 7px 12px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; font-size: 0.85rem; font-family: var(--font-body);
+      outline: none; cursor: pointer;
+    }
+    .settings-select:focus { border-color: var(--accent); }
+    .settings-number {
+      width: 80px; padding: 7px 10px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; font-size: 0.85rem; font-family: var(--font-body);
+      outline: none; text-align: center;
+    }
+    .settings-number:focus { border-color: var(--accent); }
+    .settings-cred-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .settings-cred-field { flex: 1; min-width: 160px; }
+    .settings-cred-field label { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .settings-cred-field input { width: 100%; }
+    .auth-status { font-size: 0.78rem; font-weight: 600; padding: 6px 0; }
+    .auth-status.ok { color: var(--green); }
+    .auth-status.no { color: var(--red); }
+    .btn-login { background: var(--accent); border-color: var(--accent); color: #1a120b; font-weight: 600; padding: 7px 18px; white-space: nowrap; }
+    .btn-login:hover { background: var(--accent-hover); }
+    .channel-list { display: flex; flex-direction: column; gap: 6px; }
+    .channel-row { display: flex; gap: 8px; align-items: center; }
+    .channel-row input { flex: 1; }
+    .btn-remove-channel { background: none; border: 1px solid var(--border); color: var(--red); font-size: 0.78rem; padding: 5px 10px; cursor: pointer; border-radius: 6px; }
+    .btn-remove-channel:hover { background: rgba(217,85,85,0.1); }
+    .btn-add-channel { font-size: 0.78rem; padding: 5px 14px; margin-top: 6px; }
+
+    /* ── Stats tab ───────────────────────────────────── */
+    .stats-empty { display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 40vh; color: var(--muted); text-align: center; }
+    .stats-empty p { font-size: 1rem; margin-bottom: 8px; }
+    .stats-empty small { font-size: 0.78rem; }
+
+    .stats-game-header {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px;
+      padding: 24px 28px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .stats-team-block { text-align: center; min-width: 90px; }
+    .stats-team-abbr { font-family: var(--font-display); font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .stats-team-name { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+    .stats-score-block { text-align: center; }
+    .stats-score { font-family: var(--font-display); font-size: 2.6rem; font-weight: 800; color: var(--text); }
+    .stats-score-sep { color: var(--muted); margin: 0 8px; }
+    .stats-game-meta { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+    .stats-status-pill {
+      display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 3px 10px;
+      border-radius: 20px; margin-bottom: 4px;
+      background: var(--border); color: var(--muted);
+    }
+    .stats-status-pill.live { background: rgba(143,188,106,0.15); color: var(--green); }
+    .stats-status-pill.final { background: rgba(212,145,92,0.12); color: var(--accent); }
+    .stats-refresh-btn {
+      font-size: 0.72rem; padding: 5px 12px; background: var(--border);
+      border: none; border-radius: 6px; color: var(--muted); cursor: pointer;
+    }
+    .stats-refresh-btn:hover { color: var(--text); background: var(--border-light); }
+
+    .stats-section {
+      background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px;
+      padding: 20px 24px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .stats-section-title {
+      font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+      letter-spacing: 0.06em; margin-bottom: 14px; font-weight: 600;
+    }
+
+    /* Linescore */
+    .linescore-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .linescore-table th, .linescore-table td {
+      text-align: center; padding: 5px 4px; min-width: 24px;
+    }
+    .linescore-table th { color: var(--muted); font-weight: 600; font-size: 0.7rem; border-bottom: 1px solid var(--border); }
+    .linescore-table .ls-label { text-align: left; font-weight: 700; color: var(--text); padding-right: 10px; min-width: 40px; }
+    .linescore-table .ls-total { font-weight: 800; color: var(--accent); border-left: 1px solid var(--border); }
+    .linescore-table .ls-cur { background: rgba(212,145,92,0.08); }
+    .linescore-table tr:last-child td { border-bottom: none; }
+    .linescore-table td { border-bottom: 1px solid rgba(77,58,40,0.4); }
+
+    /* Charts row — flex so single visible chart expands to full width */
+    .stats-charts-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+    .stats-charts-row .stats-section { flex: 1 1 280px; margin-bottom: 0; }
+
+    /* Win probability chart */
+    .wp-svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+    /* Spray chart */
+    .spray-svg { width: 100%; max-width: 280px; height: auto; display: block; margin: 0 auto; }
+    .spray-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
+    .spray-legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.68rem; color: var(--muted); }
+    .spray-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+    /* Scoring plays */
+    .scoring-play { border-bottom: 1px solid var(--border); padding: 9px 0; }
+    .scoring-play:last-child { border-bottom: none; }
+    .scoring-play-inning { font-size: 0.68rem; color: var(--accent); font-weight: 700; margin-bottom: 3px; }
+    .scoring-play-desc { font-size: 0.8rem; color: var(--text); line-height: 1.45; }
+    .scoring-play-score { font-size: 0.72rem; color: var(--muted); margin-top: 3px; font-weight: 600; }
+
+    /* Team stats grid */
+    .stats-teams-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 600px) { .stats-teams-grid { grid-template-columns: 1fr; } }
+    .stats-team-section { background: var(--card); border: 1px solid rgba(77,58,40,0.4); border-radius: 16px; padding: 20px 22px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .stats-team-label { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+    .stats-sub-title { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin: 12px 0 6px; }
+
+    /* Pitcher table */
+    .pitcher-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .pitcher-table th { text-align: right; font-size: 0.65rem; color: var(--muted); font-weight: 600; padding: 3px 4px 6px; border-bottom: 1px solid var(--border); }
+    .pitcher-table th:first-child { text-align: left; }
+    .pitcher-table td { text-align: right; padding: 5px 4px; color: var(--muted); border-bottom: 1px solid rgba(77,58,40,0.3); }
+    .pitcher-table td:first-child { text-align: left; color: var(--text); font-weight: 500; }
+    .pitcher-table tr:last-child td { border-bottom: none; }
+
+    /* Batting stats */
+    .batting-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+    .batting-stat { text-align: center; background: var(--bg); border-radius: 8px; padding: 8px 4px; }
+    .batting-stat-val { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+    .batting-stat-lbl { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+
+    /* Stats/condensed card extras row */
+    .card-extras {
+      display: flex; gap: 8px; padding-top: 10px; margin-top: 4px;
+    }
+    .btn-stats, .btn-condensed {
+      font-size: 0.75rem; padding: 6px 14px; border-radius: 8px;
+      background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; transition: all 0.15s; font-family: var(--font-body); font-weight: 500;
+    }
+    .btn-stats:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+    .btn-condensed:hover { border-color: var(--green); color: var(--green); background: rgba(143,188,106,0.08); }
+
+    /* ── Coffee bean decorations ──────────────────────── */
+    .bean-decoration {
+      position: absolute;
+      opacity: 0.04;
+      font-size: 6rem;
+      pointer-events: none;
+      user-select: none;
+      color: var(--accent);
+    }
+
+    /* ── Pour animation on active tab transition ──────── */
+    @keyframes pour {
+      0%   { width: 0; }
+      100% { width: 100%; }
+    }
+
+    .nav-item.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: var(--accent);
+      animation: pour 0.3s ease-out forwards;
+    }
+
+    /* ── Empty state ──────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 60px 24px;
+      color: var(--muted);
+    }
+    .empty-state-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      opacity: 0.4;
+    }
+    .empty-state-text {
+      font-size: 0.95rem;
+    }
+
+    /* ── Mobile responsive ─────────────────────────────── */
+    .sidebar-toggle {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 1.2rem;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar {
+        position: fixed;
+        left: -220px;
+        transition: left 0.25s ease;
+        z-index: 100;
+        box-shadow: none;
+      }
+      .sidebar.open {
+        left: 0;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.4);
+      }
+      .sidebar-toggle { display: block; }
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 99;
+      }
+      .sidebar-overlay.open { display: block; }
       #game-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-    }
-    @media (max-width: 600px) {
-      header { flex-direction: column; align-items: stretch; padding: 10px 12px; gap: 8px; }
-      header h1 { font-size: 1.1rem; }
-      .controls { margin-left: 0; justify-content: center; gap: 6px; }
+      .yt-section { flex-direction: column; }
       .date-nav span { min-width: auto; font-size: 0.82rem; }
+      .main-content { padding: 16px; }
+    }
+
+    @media (max-width: 480px) {
       #game-grid { grid-template-columns: 1fr; }
-      main { padding: 12px; }
-      .game-card { padding: 14px; }
-      .team-abbr { font-size: 1.4rem; }
-      .score-val { font-size: 1.3rem; }
+      .game-card { padding: 16px; }
+      .team-abbr { font-size: 1.6rem; }
+      .score-val { font-size: 1.5rem; }
       .volume-control input[type=range] { width: 70px; }
-      button { min-height: 36px; padding: 8px 12px; }
-      .btn-feed { min-height: 32px; }
-      .modal { width: 95%; padding: 18px; border-radius: 12px; }
-      #now-playing-bar { text-align: center; }
+      button { min-height: 40px; padding: 10px 14px; }
+      .btn-feed { min-height: 38px; padding: 10px 18px; font-size: 0.85rem; }
+      .section-title { font-size: 1.2rem; }
+      .card-extras { flex-wrap: wrap; }
+      .btn-stats, .btn-condensed { padding: 8px 16px; font-size: 0.78rem; }
     }
   </style>
 </head>
 <body>
-<header>
-  <h1>TV Automator</h1>
-  <div id="now-playing-bar">&#9654; Now playing: <span id="np-name"></span></div>
-  <div class="controls">
-    <div class="volume-control">
-      <button id="mute-btn" class="btn-mute" onclick="toggleMute()" title="Mute">&#128264;</button>
-      <input id="vol-slider" type="range" min="0" max="100" value="50" oninput="setVolume(this.value)">
-      <span id="vol-pct" class="vol-pct">--%</span>
+
+<!-- Mobile sidebar overlay -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon">
+      <div class="steam-container">
+        <div class="steam"></div>
+        <div class="steam"></div>
+        <div class="steam"></div>
+      </div>
+      <svg class="coffee-cup" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="6" y="14" width="22" height="18" rx="3" fill="#d4915c" opacity="0.9"/>
+        <rect x="8" y="14" width="18" height="4" rx="1" fill="#e0a06e"/>
+        <path d="M28 18h4a4 4 0 0 1 0 8h-4" stroke="#d4915c" stroke-width="2.5" stroke-linecap="round"/>
+        <rect x="10" y="32" width="14" height="3" rx="1.5" fill="#4d3a28"/>
+        <ellipse cx="17" cy="15" rx="7" ry="1.5" fill="#3b2a1a" opacity="0.3"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <h1>TV Automator</h1>
+      <div class="brand-sub">Media Control Center</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-item active" data-tab="mlb" onclick="switchTab('mlb')">
+      <span class="nav-icon">&#9918;</span> MLB Games
+    </div>
+    <div class="nav-item" data-tab="youtube" onclick="switchTab('youtube')">
+      <span class="nav-icon">&#9654;</span> YouTube
+    </div>
+    <div class="nav-item" data-tab="history" onclick="switchTab('history')">
+      <span class="nav-icon">&#128250;</span> Watch History
+    </div>
+    <div class="nav-item" data-tab="stats" onclick="switchTab('stats')">
+      <span class="nav-icon">&#9707;</span> Game Stats
+    </div>
+    <div class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+      <span class="nav-icon">&#9881;</span> Settings
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="sidebar-status">
+      <span class="ws-dot" id="ws-dot"></span>
+      <span id="ws-label" style="color:var(--muted);font-size:0.72rem">Connecting...</span>
     </div>
     <span id="auth-badge" class="auth-badge"></span>
-    <div class="date-nav">
-      <button onclick="changeDate(-1)">&#9664;</button>
-      <span id="date-label"></span>
-      <button onclick="changeDate(1)">&#9654;</button>
-    </div>
-    <button id="today-btn" onclick="goToToday()" style="display:none">Today</button>
-    <button id="stop-btn" class="btn-stop" onclick="stopPlayback()" style="display:none">&#9632; Stop</button>
-    <button id="tv-btn" class="btn-icon" onclick="toggleTV()" title="TV Power" style="display:none">&#9211;</button>
-    <button class="btn-icon" onclick="openSettings()" title="Settings">&#9881;</button>
-    <button onclick="loadGames()"><span class="ws-dot" id="ws-dot"></span>&#8635;</button>
   </div>
-</header>
-<main>
-  <div id="status-msg">Loading...</div>
-  <div id="game-grid"></div>
-</main>
+</aside>
 
-<!-- Settings Modal -->
-<div class="modal-overlay" id="settings-modal">
-  <div class="modal">
-    <h2>Settings</h2>
-    <div class="modal-section">
-      <h3>Favorite Teams</h3>
-      <div class="team-chips" id="team-chips"></div>
-    </div>
-    <div class="modal-section">
-      <div class="toggle-row">
-        <div>
-          <div class="toggle-label">Auto-start games</div>
-          <div class="toggle-desc">Automatically play when a favorite team goes live</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="auto-start-toggle">
-          <span class="slider"></span>
-        </label>
+<!-- Main area -->
+<div class="main-wrap">
+  <div class="top-bar">
+    <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+    <div id="now-playing-bar">&#9654; Now playing: <span id="np-name"></span></div>
+    <div class="top-controls">
+      <div class="volume-control">
+        <button id="mute-btn" class="btn-mute" onclick="toggleMute()" title="Mute">&#128264;</button>
+        <input id="vol-slider" type="range" min="0" max="100" value="50" oninput="setVolume(this.value)">
+        <span id="vol-pct" class="vol-pct">--%</span>
       </div>
-      <div class="toggle-row" id="cec-row" style="display:none">
-        <div>
-          <div class="toggle-label">HDMI-CEC TV control</div>
-          <div class="toggle-desc">Power TV on/off with game start/stop</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="cec-toggle">
-          <span class="slider"></span>
-        </label>
+      <div class="quality-control" id="quality-control">
+        <span class="quality-label">Quality</span>
+        <span id="quality-pills"></span>
       </div>
-    </div>
-    <div class="modal-actions">
-      <button onclick="closeSettings()">Cancel</button>
-      <button class="btn-primary" onclick="saveSettings()">Save</button>
+      <button id="stop-btn" class="btn-stop" onclick="stopPlayback()" style="display:none">&#9632; Stop</button>
+      <button class="btn-screensaver" onclick="showScreensaver()" title="Show screensaver on TV">&#128274; Screensaver</button>
+      <button id="tv-btn" class="btn-icon" onclick="toggleTV()" title="TV Power" style="display:none">&#9211;</button>
+      <button onclick="loadGames()" title="Refresh">&#8635;</button>
     </div>
   </div>
-</div>
+
+  <div class="main-content">
+
+    <!-- ═══ MLB Games Tab ═══ -->
+    <div class="tab-panel active" id="tab-mlb">
+      <div class="section-header">
+        <div>
+          <div class="section-title">MLB Games</div>
+          <div class="section-divider"></div>
+        </div>
+        <div class="date-nav">
+          <button onclick="changeDate(-1)">&#9664;</button>
+          <span id="date-label"></span>
+          <button onclick="changeDate(1)">&#9654;</button>
+          <button id="today-btn" onclick="goToToday()" style="display:none">Today</button>
+        </div>
+      </div>
+      <div id="status-msg">Loading...</div>
+      <div id="game-grid"></div>
+    </div>
+
+    <!-- ═══ YouTube Tab ═══ -->
+    <div class="tab-panel" id="tab-youtube">
+      <div class="section-header">
+        <div>
+          <div class="section-title">YouTube</div>
+          <div class="section-divider"></div>
+        </div>
+        <span id="yt-playing" class="yt-playing-tag" style="display:none">&#9654; Playing on TV</span>
+      </div>
+
+      <div class="yt-section">
+        <span class="yt-label">&#9654; Play</span>
+        <input id="yt-url" class="yt-input" type="text" placeholder="Paste a YouTube URL to play on TV..."
+               onkeydown="if(event.key==='Enter') playYouTube()">
+        <button class="btn-yt" onclick="playYouTube()">Play on TV</button>
+      </div>
+
+      <!-- YouTube playback controls -->
+      <div class="yt-controls" id="yt-controls">
+        <div class="yt-seek-row">
+          <span class="yt-time" id="yt-pos">0:00</span>
+          <input id="yt-seek" type="range" min="0" max="100" step="0.1" value="0"
+                 onmousedown="ytSeekDragging=true" onmouseup="ytCommitSeek(this.value)"
+                 ontouchstart="ytSeekDragging=true" ontouchend="ytCommitSeek(this.value)"
+                 title="Seek">
+          <span class="yt-time" id="yt-dur">0:00</span>
+        </div>
+        <div class="yt-controls-top">
+          <div class="yt-transport">
+            <button class="btn-yt-ctrl" id="yt-playpause" onclick="ytTogglePlay()" title="Play/Pause">&#9654;</button>
+            <button class="btn-cc" id="yt-cc-btn" onclick="ytToggleCC()" title="Closed Captions">CC</button>
+          </div>
+          <div class="speed-pills" id="speed-pills">
+            <button class="speed-pill" onclick="ytSetSpeedUI(0.5)">0.5&times;</button>
+            <button class="speed-pill" onclick="ytSetSpeedUI(0.75)">0.75&times;</button>
+            <button class="speed-pill active" onclick="ytSetSpeedUI(1)" data-rate="1">1&times;</button>
+            <button class="speed-pill" onclick="ytSetSpeedUI(1.25)">1.25&times;</button>
+            <button class="speed-pill" onclick="ytSetSpeedUI(1.5)">1.5&times;</button>
+            <button class="speed-pill" onclick="ytSetSpeedUI(2)">2&times;</button>
+          </div>
+          <div class="yt-vol-row">
+            <label>Vol</label>
+            <input id="yt-vol" type="range" min="0" max="100" value="100"
+                   oninput="ytSendVolume(this.value)" title="YouTube volume">
+            <span id="yt-vol-pct" style="font-size:0.75rem;color:var(--muted);min-width:28px">100%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suggested videos -->
+      <div class="suggested-section">
+        <h3>Suggested</h3>
+        <div id="suggested-videos">
+          <div class="suggested-loading">Loading suggestions...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Watch History Tab ═══ -->
+    <div class="tab-panel" id="tab-history">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Watch History</div>
+          <div class="section-divider"></div>
+        </div>
+        <span class="yt-history-count" id="yt-history-count" style="font-size:0.85rem;color:var(--muted)"></span>
+      </div>
+      <div class="yt-history" id="yt-history-panel" style="display:none">
+        <div class="yt-history-list" id="yt-history-list"></div>
+      </div>
+      <div class="empty-state" id="history-empty">
+        <div class="empty-state-icon">&#128250;</div>
+        <div class="empty-state-text">No watch history yet. Play some YouTube videos to get started.</div>
+      </div>
+    </div>
+
+    <!-- ═══ Stats Tab ═══ -->
+    <div class="tab-panel" id="tab-stats">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Game Stats</div>
+          <div class="section-divider"></div>
+        </div>
+        <button class="stats-refresh-btn" onclick="refreshStats()" id="stats-refresh-btn" style="display:none">&#8635; Refresh</button>
+      </div>
+
+      <div id="stats-empty" class="stats-empty">
+        <p>No game selected</p>
+        <small>Click the stats button on any live or finished game card</small>
+      </div>
+
+      <div id="stats-content" style="display:none">
+
+        <!-- Game header -->
+        <div class="stats-game-header" id="stats-header"></div>
+
+        <!-- Linescore -->
+        <div class="stats-section" id="stats-linescore-section">
+          <div class="stats-section-title">Line Score</div>
+          <div style="overflow-x:auto"><table class="linescore-table" id="stats-linescore"></table></div>
+        </div>
+
+        <!-- Charts row: win probability + spray chart -->
+        <div class="stats-charts-row">
+          <div class="stats-section" id="stats-wp-section" style="display:none">
+            <div class="stats-section-title">Win Probability</div>
+            <svg class="wp-svg" id="stats-wp-svg" viewBox="0 0 400 160" xmlns="http://www.w3.org/2000/svg"></svg>
+          </div>
+          <div class="stats-section" id="stats-spray-section" style="display:none">
+            <div class="stats-section-title">Spray Chart</div>
+            <svg class="spray-svg" id="stats-spray-svg" viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div class="spray-legend" id="stats-spray-legend"></div>
+          </div>
+        </div>
+
+        <!-- Scoring plays -->
+        <div class="stats-section" id="stats-scoring-section" style="display:none">
+          <div class="stats-section-title">Scoring Plays</div>
+          <div id="stats-scoring"></div>
+        </div>
+
+        <!-- Team stats: pitching + batting, two columns -->
+        <div class="stats-teams-grid">
+          <div class="stats-team-section" id="stats-away-section">
+            <div class="stats-team-label" id="stats-away-label">Away</div>
+            <div class="stats-sub-title">Pitching</div>
+            <table class="pitcher-table" id="stats-away-pitchers">
+              <thead><tr><th>Pitcher</th><th>IP</th><th>H</th><th>R</th><th>BB</th><th>K</th><th>P</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="stats-sub-title">Batting</div>
+            <div class="batting-grid" id="stats-away-batting"></div>
+          </div>
+          <div class="stats-team-section" id="stats-home-section">
+            <div class="stats-team-label" id="stats-home-label">Home</div>
+            <div class="stats-sub-title">Pitching</div>
+            <table class="pitcher-table" id="stats-home-pitchers">
+              <thead><tr><th>Pitcher</th><th>IP</th><th>H</th><th>R</th><th>BB</th><th>K</th><th>P</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="stats-sub-title">Batting</div>
+            <div class="batting-grid" id="stats-home-batting"></div>
+          </div>
+        </div>
+
+      </div><!-- #stats-content -->
+    </div><!-- #tab-stats -->
+
+    <!-- ═══ Settings Tab ═══ -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Settings</div>
+          <div class="section-divider"></div>
+        </div>
+      </div>
+
+      <!-- MLB.TV Account -->
+      <div class="settings-section">
+        <h3>MLB.TV Account</h3>
+        <div class="auth-status" id="settings-auth-status"></div>
+        <div class="settings-cred-row">
+          <div class="settings-cred-field">
+            <label>Email / Username</label>
+            <input type="text" id="settings-mlb-user" class="settings-input" placeholder="your@email.com" autocomplete="username">
+          </div>
+          <div class="settings-cred-field">
+            <label>Password</label>
+            <input type="password" id="settings-mlb-pass" class="settings-input" placeholder="Enter password" autocomplete="current-password">
+          </div>
+          <button class="btn-login" onclick="saveCredentials()">Login</button>
+        </div>
+      </div>
+
+      <!-- Favorite Teams -->
+      <div class="settings-section">
+        <h3>Favorite Teams</h3>
+        <div class="team-chips" id="team-chips"></div>
+      </div>
+
+      <!-- Playback -->
+      <div class="settings-section">
+        <h3>Playback</h3>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Auto-start games</div>
+            <div class="toggle-desc">Automatically play when a favorite team goes live</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="auto-start-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="settings-input-row">
+          <div>
+            <div class="toggle-label">Default feed</div>
+            <div class="toggle-desc">Which broadcast to default to</div>
+          </div>
+          <select id="settings-default-feed" class="settings-select">
+            <option value="HOME">Home</option>
+            <option value="AWAY">Away</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Stream Overlay -->
+      <div class="settings-section">
+        <h3>Stream Overlay</h3>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Strike zone overlay</div>
+            <div class="toggle-desc">Show live pitch locations over the game stream</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="sz-enabled-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row" id="sz-size-row">
+          <div>
+            <div class="toggle-label">Overlay size</div>
+            <div class="toggle-desc">Size of the strike zone widget on screen</div>
+          </div>
+          <div class="size-pills" id="sz-size-pills">
+            <button class="size-pill" data-size="small" onclick="selectSzSize('small')">S</button>
+            <button class="size-pill active" data-size="medium" onclick="selectSzSize('medium')">M</button>
+            <button class="size-pill" data-size="large" onclick="selectSzSize('large')">L</button>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Batter intel card</div>
+            <div class="toggle-desc">Flash batter stats when a new batter steps up</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="batter-intel-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Between-innings dashboard</div>
+            <div class="toggle-desc">Show scores and due-up batters during breaks</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="between-innings-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Display -->
+      <div class="settings-section">
+        <h3>Display</h3>
+        <div class="settings-input-row">
+          <div>
+            <div class="toggle-label">Resolution</div>
+            <div class="toggle-desc">TV display resolution</div>
+          </div>
+          <select id="settings-resolution" class="settings-select">
+            <option value="1920x1080">1920x1080</option>
+            <option value="2560x1440">2560x1440</option>
+            <option value="3840x2160">3840x2160</option>
+            <option value="1280x720">1280x720</option>
+          </select>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Fullscreen</div>
+            <div class="toggle-desc">Launch browser in fullscreen kiosk mode</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="settings-fullscreen" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Scheduler -->
+      <div class="settings-section">
+        <h3>Scheduler</h3>
+        <div class="settings-input-row">
+          <div>
+            <div class="toggle-label">Poll interval</div>
+            <div class="toggle-desc">How often to check for game updates (seconds)</div>
+          </div>
+          <input type="number" id="settings-poll-interval" class="settings-number" min="15" max="300" value="60">
+        </div>
+        <div class="settings-input-row">
+          <div>
+            <div class="toggle-label">Pre-game minutes</div>
+            <div class="toggle-desc">Minutes before first pitch to begin setup</div>
+          </div>
+          <input type="number" id="settings-pre-game" class="settings-number" min="0" max="30" value="5">
+        </div>
+      </div>
+
+      <!-- HDMI-CEC -->
+      <div class="settings-section" id="cec-section" style="display:none">
+        <h3>HDMI-CEC</h3>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Enable CEC control</div>
+            <div class="toggle-desc">Control TV power via HDMI-CEC</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cec-toggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">Power off on stop</div>
+            <div class="toggle-desc">Turn TV off when playback stops</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cec-power-off-toggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- YouTube Channels -->
+      <div class="settings-section">
+        <h3>YouTube Channels</h3>
+        <div class="toggle-desc" style="margin-bottom:10px">Channels shown in the Suggested section. Paste a YouTube channel ID and name.</div>
+        <div class="channel-list" id="channel-list"></div>
+        <button class="btn-add-channel" onclick="addChannelRow()">+ Add Channel</button>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+      </div>
+    </div>
+
+  </div><!-- .main-content -->
+</div><!-- .main-wrap -->
 
 <script>
-  let currentDate = new Date();
-  currentDate.setHours(0, 0, 0, 0);
+  const TZ = 'America/Los_Angeles';
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function dateStr(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+
+  // Get "today" in Pacific time regardless of browser timezone
+  function pacificToday() {
+    const now = new Date();
+    const s = now.toLocaleDateString('en-CA', {timeZone: TZ}); // YYYY-MM-DD
+    const parts = s.split('-');
+    const d = new Date(+parts[0], +parts[1]-1, +parts[2]);
+    d.setHours(0,0,0,0);
+    return d;
+  }
+
+  let currentDate = pacificToday();
   let nowPlayingId = null;
   let refreshTimer = null;
   let favorites = new Set();
@@ -332,11 +1365,8 @@
   let autoplayGameId = null;
   let autoplayFeed = null;
 
-  function pad(n) { return String(n).padStart(2, '0'); }
-  function dateStr(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
-
   function formatDateLabel(d) {
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = pacificToday();
     const y = new Date(today); y.setDate(today.getDate()-1);
     const t = new Date(today); t.setDate(today.getDate()+1);
     let label;
@@ -348,11 +1378,319 @@
   }
 
   function changeDate(delta) { currentDate.setDate(currentDate.getDate()+delta); updateDateLabel(); loadGames(); }
-  function goToToday() { currentDate=new Date(); currentDate.setHours(0,0,0,0); updateDateLabel(); loadGames(); }
+  function goToToday() { currentDate=pacificToday(); updateDateLabel(); loadGames(); }
   function updateDateLabel() {
     document.getElementById('date-label').textContent=formatDateLabel(currentDate);
-    const today=new Date(); today.setHours(0,0,0,0);
+    const today=pacificToday();
     document.getElementById('today-btn').style.display=currentDate.getTime()===today.getTime()?'none':'';
+  }
+
+  // ── Tab navigation ──────────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(el) { el.classList.remove('active'); });
+    document.querySelector('.nav-item[data-tab="'+tab+'"]').classList.add('active');
+    document.getElementById('tab-'+tab).classList.add('active');
+    // Load tab-specific data
+    if (tab === 'youtube') loadSuggested();
+    if (tab === 'history') loadHistory();
+    if (tab === 'settings') { openSettings(); }
+    if (tab === 'stats') { loadStats(currentStatsGameId); }
+    closeSidebar();
+  }
+
+  // ── Mobile sidebar ────────────────────────────────────────
+  function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('open');
+  }
+  function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+  }
+
+  // ── YouTube ────────────────────────────────────────────────
+  let ytPollTimer = null;
+  let ytSeekDragging = false;
+  let ytDuration = 0;
+  let ytPlaying = false;
+
+  async function playYouTube() {
+    const input = document.getElementById('yt-url');
+    const url = input.value.trim();
+    if (!url) return;
+    try {
+      const res = await fetch('/api/youtube', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: url})
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        input.value = '';
+        document.getElementById('yt-playing').style.display = '';
+        showYtControls(true);
+        startYtPoll();
+        setTimeout(loadHistory, 3000);
+      } else {
+        alert(data.detail || 'Invalid YouTube URL');
+      }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  function showYtControls(on) {
+    document.getElementById('yt-controls').classList.toggle('active', on);
+    document.getElementById('yt-playing').style.display = on ? '' : 'none';
+    if (!on) {
+      ytCurrentRate = 1;
+      ytCCEnabled = false;
+      updateSpeedPills(1);
+      document.getElementById('yt-cc-btn').classList.remove('active');
+      document.getElementById('yt-pos').textContent = '0:00';
+      document.getElementById('yt-dur').textContent = '0:00';
+    }
+  }
+
+  function startYtPoll() {
+    clearInterval(ytPollTimer);
+    ytPollTimer = setInterval(pollYtState, 1500);
+  }
+
+  function stopYtPoll() {
+    clearInterval(ytPollTimer);
+    ytPollTimer = null;
+  }
+
+  let ytCurrentRate = 1;
+  let ytCCEnabled = false;
+
+  async function pollYtState() {
+    try {
+      const res = await fetch('/api/youtube/state');
+      if (!res.ok) return;
+      const s = await res.json();
+      ytDuration = s.duration || 0;
+      ytPlaying = s.state === 1;
+      document.getElementById('yt-playpause').innerHTML = ytPlaying ? '&#9646;&#9646;' : '&#9654;';
+      if (!ytSeekDragging && ytDuration > 0) {
+        document.getElementById('yt-seek').value = (s.currentTime / ytDuration) * 100;
+      }
+      document.getElementById('yt-pos').textContent = fmtTime(s.currentTime);
+      document.getElementById('yt-dur').textContent = fmtTime(ytDuration);
+      document.getElementById('yt-vol').value = s.muted ? 0 : s.volume;
+      document.getElementById('yt-vol-pct').textContent = (s.muted ? 0 : s.volume) + '%';
+      if (s.playbackRate && s.playbackRate !== ytCurrentRate) {
+        ytCurrentRate = s.playbackRate;
+        updateSpeedPills(ytCurrentRate);
+      }
+      if (s.ccEnabled !== undefined && s.ccEnabled !== ytCCEnabled) {
+        ytCCEnabled = s.ccEnabled;
+        document.getElementById('yt-cc-btn').classList.toggle('active', ytCCEnabled);
+      }
+    } catch(e) {}
+  }
+
+  function fmtTime(sec) {
+    sec = Math.floor(sec || 0);
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  async function ytCmd(cmd, extra) {
+    try {
+      const body = Object.assign({cmd}, extra || {});
+      await fetch('/api/youtube/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+    } catch(e) {}
+  }
+
+  function ytTogglePlay() { ytCmd(ytPlaying ? 'pause' : 'play'); }
+
+  let ytVolTimer = null;
+  function ytSendVolume(val) {
+    document.getElementById('yt-vol-pct').textContent = val + '%';
+    clearTimeout(ytVolTimer);
+    ytVolTimer = setTimeout(function() { ytCmd('volume', {volume: parseInt(val)}); }, 120);
+  }
+
+  function ytCommitSeek(pct) {
+    ytSeekDragging = false;
+    if (ytDuration > 0) {
+      ytCmd('seek', {time: (pct / 100) * ytDuration});
+    }
+  }
+
+  function updateSpeedPills(rate) {
+    document.querySelectorAll('.speed-pill').forEach(function(btn) {
+      btn.classList.remove('active');
+      if (Math.abs(parseFloat(btn.textContent) - rate) < 0.01) {
+        btn.classList.add('active');
+      }
+    });
+  }
+
+  function ytSetSpeedUI(rate) {
+    ytCurrentRate = rate;
+    updateSpeedPills(rate);
+    ytCmd('speed', {rate: rate});
+  }
+
+  function ytToggleCC() {
+    ytCCEnabled = !ytCCEnabled;
+    document.getElementById('yt-cc-btn').classList.toggle('active', ytCCEnabled);
+    ytCmd('cc', {enabled: ytCCEnabled});
+  }
+
+  // ── Suggested videos ───────────────────────────────────────
+  let suggestedLoaded = false;
+
+  async function loadSuggested() {
+    if (suggestedLoaded) return;
+    const container = document.getElementById('suggested-videos');
+    try {
+      const res = await fetch('/api/youtube/suggested');
+      if (!res.ok) { container.innerHTML = '<div class="suggested-loading">Failed to load suggestions.</div>'; return; }
+      const data = await res.json();
+      suggestedLoaded = true;
+      let html = '';
+      for (const [channel, videos] of Object.entries(data)) {
+        if (!videos.length) continue;
+        html += '<div class="suggested-channel">';
+        html += '<div class="suggested-channel-name">' + escHtml(channel) + '</div>';
+        html += '<div class="suggested-grid">';
+        for (const v of videos) {
+          const thumb = v.thumbnail || ('https://img.youtube.com/vi/' + v.video_id + '/mqdefault.jpg');
+          const ago = v.published ? fmtRelTime(v.published) : '';
+          html += '<div class="suggested-card" onclick="playSuggested(\'' + v.video_id + '\')">'
+            + '<img class="suggested-thumb" src="' + escHtml(thumb) + '" loading="lazy">'
+            + '<div class="suggested-info">'
+            + '<div class="suggested-title">' + escHtml(v.title) + '</div>'
+            + '<div class="suggested-meta">' + ago + '</div>'
+            + '</div></div>';
+        }
+        html += '</div></div>';
+      }
+      container.innerHTML = html || '<div class="suggested-loading">No suggestions available.</div>';
+    } catch(e) {
+      container.innerHTML = '<div class="suggested-loading">Failed to load suggestions.</div>';
+    }
+  }
+
+  async function playSuggested(videoId) {
+    try {
+      const res = await fetch('/api/youtube', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + videoId})
+      });
+      if (res.ok) { showYtControls(true); startYtPoll(); setTimeout(loadHistory, 3000); }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  // ── Watch history ──────────────────────────────────────────
+  let historyOpen = true;
+  let watchHistory = [];
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/youtube/history');
+      if (res.ok) {
+        watchHistory = await res.json();
+        renderHistory();
+      }
+    } catch(e) {}
+  }
+
+  function fmtRelTime(iso) {
+    if (!iso) return '';
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+    return Math.floor(diff/86400) + 'd ago';
+  }
+
+  function renderHistory() {
+    const panel = document.getElementById('yt-history-panel');
+    const list = document.getElementById('yt-history-list');
+    const count = document.getElementById('yt-history-count');
+    const empty = document.getElementById('history-empty');
+    if (!watchHistory.length) { panel.style.display = 'none'; empty.style.display = ''; return; }
+    panel.style.display = '';
+    empty.style.display = 'none';
+    count.textContent = watchHistory.length + ' video' + (watchHistory.length !== 1 ? 's' : '');
+    list.innerHTML = watchHistory.map(function(e) {
+      const pct = e.duration > 0 ? Math.min(100, Math.round((e.position / e.duration) * 100)) : 0;
+      const done = e.completed;
+      const posStr = done ? 'Watched' : (e.position > 0 ? 'Stopped at ' + fmtTime(e.position) : '');
+      const metaParts = [posStr, fmtRelTime(e.lastWatched || e.last_watched)].filter(Boolean);
+      const resumeBtn = (!done && e.position > 5)
+        ? '<button class="btn-yt-hist resume" onclick="resumeVideo(\'' + e.video_id + '\',' + e.position + ')">&#9654; Resume ' + fmtTime(e.position) + '</button>'
+        : '';
+      return '<div class="yt-hist-item">'
+        + '<img class="yt-hist-thumb" src="https://img.youtube.com/vi/' + e.video_id + '/mqdefault.jpg" loading="lazy">'
+        + '<div class="yt-hist-info">'
+        + '<div class="yt-hist-title">' + escHtml(e.title || e.video_id) + '</div>'
+        + (e.channel ? '<div class="yt-hist-channel">' + escHtml(e.channel) + '</div>' : '')
+        + '<div class="yt-hist-progress-bar"><div class="yt-hist-progress-fill' + (done?' done':'') + '" style="width:' + pct + '%"></div></div>'
+        + '<div class="yt-hist-meta">' + metaParts.join(' &middot; ') + '</div>'
+        + '<div class="yt-hist-actions">'
+        + resumeBtn
+        + '<button class="btn-yt-hist" onclick="replayVideo(\'' + e.video_id + '\')">&#8635; Replay</button>'
+        + '<button class="btn-yt-hist del" onclick="removeHistory(\'' + e.video_id + '\')">&#10005;</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function resumeVideo(videoId, position) {
+    try {
+      const res = await fetch('/api/youtube', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + videoId, resume_position: position})
+      });
+      if (res.ok) { switchTab('youtube'); showYtControls(true); startYtPoll(); loadHistory(); }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  async function replayVideo(videoId) {
+    try {
+      const res = await fetch('/api/youtube', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: 'https://www.youtube.com/watch?v=' + videoId})
+      });
+      if (res.ok) { switchTab('youtube'); showYtControls(true); startYtPoll(); loadHistory(); }
+    } catch(e) { alert('Error: ' + e.message); }
+  }
+
+  async function removeHistory(videoId) {
+    try {
+      await fetch('/api/youtube/history/' + videoId, {method: 'DELETE'});
+      watchHistory = watchHistory.filter(function(e) { return e.video_id !== videoId; });
+      renderHistory();
+    } catch(e) {}
+  }
+
+  // ── Screensaver ────────────────────────────────────────────
+  async function showScreensaver() {
+    try {
+      await fetch('/api/screensaver', {method: 'POST'});
+      showYtControls(false);
+      stopYtPoll();
+      nowPlayingId = null;
+      updateStatus(lastGames, {authenticated: document.getElementById('auth-badge').classList.contains('auth-ok'), youtube_mode: false});
+      renderGames(lastGames);
+    } catch(e) { alert('Error: ' + e.message); }
   }
 
   // ── Data loading ──────────────────────────────────────────
@@ -366,11 +1704,11 @@
       const games=await gRes.json(), status=await sRes.json();
       nowPlayingId=status.now_playing_game_id;
       lastGames=games;
+      if (status.youtube_mode) { showYtControls(true); startYtPoll(); }
       updateStatus(games,status);
       if(!games.length){document.getElementById('status-msg').textContent='No games scheduled.';}
       else{document.getElementById('status-msg').style.display='none';renderGames(games);}
     } catch(e){document.getElementById('status-msg').textContent='Error: '+e.message;}
-    // Fallback polling if WS isn't connected
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       refreshTimer=setTimeout(loadGames,30000);
     }
@@ -378,11 +1716,24 @@
 
   function updateStatus(games,status) {
     const bar=document.getElementById('now-playing-bar'),stopBtn=document.getElementById('stop-btn');
+    const ytPlayingEl=document.getElementById('yt-playing');
+    const wasPlaying = !!nowPlayingId;
     if(nowPlayingId){
       const g=games.find(x=>x.game_id===nowPlayingId);
       document.getElementById('np-name').textContent=g?g.display_matchup:nowPlayingId;
       bar.style.display='';stopBtn.style.display='';
-    } else { bar.style.display='none';stopBtn.style.display='none'; }
+    } else {
+      bar.style.display='none';stopBtn.style.display='none';
+      document.getElementById('quality-control').classList.remove('visible');
+    }
+    // Load quality levels when a game starts (or on first status with a game playing)
+    if (nowPlayingId && !status.youtube_mode) {
+      if (!wasPlaying) activeQualityLevel = -1;
+      loadQualityLevels();
+      // Auto-set stats game to currently playing game
+      if (!currentStatsGameId || !wasPlaying) currentStatsGameId = nowPlayingId;
+    }
+    ytPlayingEl.style.display = (status.youtube_mode && !nowPlayingId) ? '' : 'none';
     const badge=document.getElementById('auth-badge');
     badge.className='auth-badge '+(status.authenticated?'auth-ok':'auth-no');
     badge.textContent=status.authenticated?'\u2713 Logged in':'\u2717 No auth';
@@ -415,6 +1766,14 @@
     const pitcherHTML=(!g.display_score&&pp.length)?'<div class="pitchers">'+pp.join(' \u00b7 ')+'</div>':'';
 
     let actionHTML;
+    const hasStats = isLive || g.status === 'final';
+    const condensedBtn = g.status === 'final'
+      ? '<button class="btn-condensed" onclick="playCondensed(\''+g.game_id+'\')" title="Play ~30 min condensed replay">&#9654; Condensed</button>'
+      : '';
+    const statsBtn = hasStats
+      ? '<button class="btn-stats" onclick="openStats(\''+g.game_id+'\')">Stats</button>'
+      : '';
+
     if(isPlaying){
       actionHTML='<span class="now-playing-tag">&#9654; Playing</span>';
     } else if(canWatch){
@@ -425,6 +1784,10 @@
     } else {
       actionHTML='<div class="feed-btns"><button class="btn-feed" disabled>Not available</button></div>';
     }
+
+    const extrasHTML = (statsBtn || condensedBtn)
+      ? '<div class="card-extras">'+statsBtn+condensedBtn+'</div>'
+      : '';
 
     const autoplayRowHTML = canQueue
       ? '<div class="autoplay-row">'
@@ -451,6 +1814,7 @@
       +'</div>'
       +pitcherHTML
       +'<div class="card-footer"><span class="game-time">'+g.display_time+'</span>'+actionHTML+'</div>'
+      +extrasHTML
       +autoplayRowHTML
       +'</div>';
   }
@@ -467,7 +1831,6 @@
   }
 
   async function toggleAutoplay(gameId, feed) {
-    // If this game+feed is already queued, clear it. Otherwise set it.
     const clearing = autoplayGameId === gameId && autoplayFeed === feed;
     try {
       const res = await fetch('/api/autoplay', {
@@ -534,6 +1897,292 @@
     btn.innerHTML = isMuted ? '&#128263;' : '&#128264;';
   }
 
+  // ── Quality selector ────────────────────────────────────────
+  let activeQualityLevel = -1;  // -1 = Auto
+
+  function qualityLabel(lvl) {
+    if (lvl.height >= 1080) return '1080p';
+    if (lvl.height >= 720)  return '720p';
+    if (lvl.height >= 480)  return '480p';
+    if (lvl.height >= 360)  return '360p';
+    if (lvl.height >= 270)  return '270p';
+    if (lvl.height > 0)     return lvl.height + 'p';
+    // No height info — fall back to bitrate
+    const mbps = (lvl.bitrate / 1e6).toFixed(1);
+    return mbps + 'M';
+  }
+
+  async function loadQualityLevels() {
+    const ctrl = document.getElementById('quality-control');
+    const pills = document.getElementById('quality-pills');
+    try {
+      const res = await fetch('/api/player/levels');
+      if (!res.ok) { ctrl.classList.remove('visible'); return; }
+      const { levels } = await res.json();
+      if (!levels || levels.length < 2) { ctrl.classList.remove('visible'); return; }
+
+      // Deduplicate by label (keep lowest index per label)
+      const seen = new Map();
+      const allLevels = [{ index: -1, label: 'Auto' }];
+      for (const l of levels) {
+        const lbl = qualityLabel(l);
+        if (!seen.has(lbl)) { seen.set(lbl, true); allLevels.push({ index: l.index, label: lbl }); }
+      }
+
+      pills.innerHTML = allLevels.map(function(l) {
+        const active = l.index === activeQualityLevel ? ' active' : '';
+        return '<button class="quality-pill' + active + '" onclick="setQuality(' + l.index + ', this)">' + l.label + '</button>';
+      }).join('');
+      ctrl.classList.add('visible');
+    } catch(e) { ctrl.classList.remove('visible'); }
+  }
+
+  async function setQuality(level, btn) {
+    activeQualityLevel = level;
+    document.querySelectorAll('.quality-pill').forEach(function(p) { p.classList.remove('active'); });
+    btn.classList.add('active');
+    try {
+      await fetch('/api/player/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'quality', level: level }),
+      });
+    } catch(e) {}
+  }
+
+  // ── Game Stats ──────────────────────────────────────────────
+  let currentStatsGameId = null;
+  let statsAutoRefresh = null;
+
+  function openStats(gameId) {
+    currentStatsGameId = gameId;
+    switchTab('stats');
+  }
+
+  function refreshStats() { loadStats(currentStatsGameId); }
+
+  async function loadStats(gameId) {
+    const empty = document.getElementById('stats-empty');
+    const content = document.getElementById('stats-content');
+    const refreshBtn = document.getElementById('stats-refresh-btn');
+    if (!gameId) { empty.style.display=''; content.style.display='none'; refreshBtn.style.display='none'; return; }
+    empty.style.display='none'; content.style.display=''; refreshBtn.style.display='';
+    try {
+      const res = await fetch('/api/game/' + gameId + '/stats');
+      if (!res.ok) { empty.style.display=''; content.style.display='none'; empty.querySelector('p').textContent='Failed to load stats'; return; }
+      const d = await res.json();
+      renderStatsHeader(d);
+      renderLinescore(d);
+      renderWinProb(d);
+      renderSpray(d);
+      renderScoringPlays(d);
+      renderTeamStats(d);
+    } catch(e) { console.error('Stats load error:', e); }
+  }
+
+  function renderStatsHeader(d) {
+    const info = d.info;
+    const awayR = d.linescore.away.runs;
+    const homeR = d.linescore.home.runs;
+    const isLive = (info.status || '').toLowerCase().includes('progress');
+    const statusCls = isLive ? 'live' : 'final';
+    document.getElementById('stats-header').innerHTML =
+      '<div class="stats-team-block"><div class="stats-team-abbr">'+info.away_abbr+'</div><div class="stats-team-name">'+info.away_name+'</div></div>'
+      +'<div class="stats-score-block">'
+        +'<div><span class="stats-score">'+awayR+'</span><span class="stats-score-sep">-</span><span class="stats-score">'+homeR+'</span></div>'
+        +'<div><span class="stats-status-pill '+statusCls+'">'+info.status+'</span></div>'
+        +'<div class="stats-game-meta">'+info.venue+'</div>'
+      +'</div>'
+      +'<div class="stats-team-block"><div class="stats-team-abbr">'+info.home_abbr+'</div><div class="stats-team-name">'+info.home_name+'</div></div>';
+  }
+
+  function renderLinescore(d) {
+    const ls = d.linescore;
+    const info = d.info;
+    const innings = ls.innings;
+    if (!innings.length) return;
+
+    // Build header row
+    let hdr = '<tr><th class="ls-label"></th>';
+    innings.forEach(function(inn) { hdr += '<th>'+inn.num+'</th>'; });
+    hdr += '<th class="ls-total">R</th><th class="ls-total">H</th><th class="ls-total">E</th></tr>';
+
+    function teamRow(label, runKey, hKey, eKey, totals) {
+      let row = '<tr><td class="ls-label">'+label+'</td>';
+      innings.forEach(function(inn) {
+        const val = inn[runKey];
+        row += '<td>'+(val===''||val===null||val===undefined?'&mdash;':val)+'</td>';
+      });
+      row += '<td class="ls-total">'+totals.runs+'</td><td class="ls-total">'+totals.hits+'</td><td class="ls-total">'+totals.errors+'</td></tr>';
+      return row;
+    }
+
+    document.getElementById('stats-linescore').innerHTML =
+      '<thead>'+hdr+'</thead><tbody>'
+      +teamRow(info.away_abbr, 'away_r', 'away_h', 'away_e', ls.away)
+      +teamRow(info.home_abbr, 'home_r', 'home_h', 'home_e', ls.home)
+      +'</tbody>';
+  }
+
+  function renderWinProb(gameData) {
+    const wp = gameData.win_prob;
+    const sec = document.getElementById('stats-wp-section');
+    if (!wp || wp.length < 2) { sec.style.display='none'; return; }
+    sec.style.display='';
+
+    const W=400, H=160, pad={t:20,r:12,b:30,l:36};
+    const iW=W-pad.l-pad.r, iH=H-pad.t-pad.b;
+    const maxAb = wp[wp.length-1].ab || 1;
+
+    function scaleX(ab) { return pad.l + (ab/maxAb)*iW; }
+    function scaleY(hwp) { return pad.t + (1-(hwp/100))*iH; }
+
+    // 50% line
+    const y50 = scaleY(50);
+
+    // Split polyline into above/below 50%
+    const pts = wp.map(function(p) { return [scaleX(p.ab), scaleY(p.hwp)]; });
+    const polyPts = pts.map(function(p) { return p[0].toFixed(1)+','+p[1].toFixed(1); }).join(' ');
+
+    // Build area path for home (above 50%) and away (below 50%)
+    function buildArea(isHome) {
+      let pathStr = 'M'+pad.l+','+y50;
+      pts.forEach(function(p) {
+        const clipped = isHome ? Math.min(p[1], y50) : Math.max(p[1], y50);
+        pathStr += ' L'+p[0].toFixed(1)+','+clipped.toFixed(1);
+      });
+      pathStr += ' L'+(pad.l+iW)+','+y50+' Z';
+      return pathStr;
+    }
+
+    // Y axis ticks
+    const ticks = [0,25,50,75,100].map(function(v) {
+      return '<text x="'+(pad.l-4)+'" y="'+(scaleY(v)+4).toFixed(1)+'" text-anchor="end" fill="rgba(255,255,255,0.3)" font-size="9">'+v+'</text>'
+           + '<line x1="'+pad.l+'" y1="'+scaleY(v).toFixed(1)+'" x2="'+(pad.l+iW)+'" y2="'+scaleY(v).toFixed(1)+'" stroke="rgba(255,255,255,'+(v===50?'0.15':'0.05')+')" stroke-width="'+(v===50?1.5:0.5)+'"/>';
+    }).join('');
+
+    // Team labels
+    const info = gameData.info || {};
+    const awayLabel = (info.away_abbr||'Away')+' leads';
+    const homeLabel = (info.home_abbr||'Home')+' leads';
+
+    document.getElementById('stats-wp-svg').innerHTML =
+      ticks
+      +'<path d="'+buildArea(false)+'" fill="rgba(91,155,213,0.12)"/>'
+      +'<path d="'+buildArea(true)+'" fill="rgba(212,145,92,0.12)"/>'
+      +'<polyline points="'+polyPts+'" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>'
+      +'<text x="'+(pad.l+4)+'" y="'+(pad.t+10)+'" fill="rgba(212,145,92,0.5)" font-size="8">'+homeLabel+'</text>'
+      +'<text x="'+(pad.l+4)+'" y="'+(pad.t+iH-4)+'" fill="rgba(91,155,213,0.5)" font-size="8">'+awayLabel+'</text>';
+  }
+
+  const SPRAY_COLORS = {
+    'Single': '#5b9bd5',
+    'Double': '#8fbc6a',
+    'Triple': '#e0a832',
+    'Home Run': '#ef4444',
+  };
+  function sprayColor(event) {
+    for (const key of Object.keys(SPRAY_COLORS)) {
+      if (event.includes(key)) return SPRAY_COLORS[key];
+    }
+    return 'rgba(255,255,255,0.2)';
+  }
+  function sprayRadius(event) {
+    if (event.includes('Home Run')) return 6;
+    if (event.includes('Triple')) return 5;
+    if (event.includes('Double')) return 4.5;
+    if (event.includes('Single')) return 4;
+    return 3;
+  }
+
+  function renderSpray(d) {
+    const hits = d.hits;
+    const sec = document.getElementById('stats-spray-section');
+    if (!hits || hits.length === 0) { sec.style.display='none'; return; }
+    sec.style.display='';
+
+    // Field outline SVG paths (250x250 coordinate space, home plate ~125,220)
+    const field =
+      // Outfield wall arc
+      '<path d="M 10,240 Q 10,10 125,10 Q 240,10 240,240" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>'
+      // Foul lines
+      +'<line x1="125" y1="220" x2="10" y2="70" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>'
+      +'<line x1="125" y1="220" x2="240" y2="70" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>'
+      // Infield dirt circle (approx)
+      +'<circle cx="125" cy="155" r="58" fill="none" stroke="rgba(180,130,80,0.15)" stroke-width="1"/>'
+      // Bases: 2B top, 1B right, 3B left
+      +'<rect x="117" y="87" width="16" height="16" rx="2" fill="rgba(255,255,255,0.12)"/>'
+      +'<rect x="179" y="148" width="14" height="14" rx="2" fill="rgba(255,255,255,0.12)"/>'
+      +'<rect x="57" y="148" width="14" height="14" rx="2" fill="rgba(255,255,255,0.12)"/>'
+      // Home plate
+      +'<polygon points="119,224 131,224 134,218 125,214 116,218" fill="rgba(255,255,255,0.2)"/>';
+
+    // Hit dots
+    const dots = hits.map(function(h) {
+      const color = sprayColor(h.event);
+      const r = sprayRadius(h.event);
+      const isOut = !Object.keys(SPRAY_COLORS).some(function(k) { return h.event.includes(k); });
+      const title = h.batter ? '<title>'+h.batter+' \u2014 '+h.event+(h.distance?' ('+Math.round(h.distance)+'ft)':'')+'</title>' : '';
+      return '<circle cx="'+h.x.toFixed(1)+'" cy="'+h.y.toFixed(1)+'" r="'+r+'" fill="'+color+'" opacity="'+(isOut?'0.25':'0.75')+'" stroke="rgba(255,255,255,0.15)" stroke-width="0.5">'+title+'</circle>';
+    }).join('');
+
+    document.getElementById('stats-spray-svg').innerHTML = field + dots;
+
+    // Legend
+    const legendItems = Object.entries(SPRAY_COLORS).map(function([label, color]) {
+      return '<div class="spray-legend-item"><span class="spray-legend-dot" style="background:'+color+'"></span>'+label+'</div>';
+    }).join('') + '<div class="spray-legend-item"><span class="spray-legend-dot" style="background:rgba(255,255,255,0.2)"></span>Out</div>';
+    document.getElementById('stats-spray-legend').innerHTML = legendItems;
+  }
+
+  function renderScoringPlays(d) {
+    const plays = d.scoring_plays;
+    const sec = document.getElementById('stats-scoring-section');
+    if (!plays || !plays.length) { sec.style.display='none'; return; }
+    sec.style.display='';
+    const info = d.info;
+    document.getElementById('stats-scoring').innerHTML = plays.map(function(p) {
+      const half = p.half === 'top' ? 'Top' : 'Bot';
+      return '<div class="scoring-play">'
+        +'<div class="scoring-play-inning">'+half+' '+p.inning+'</div>'
+        +'<div class="scoring-play-desc">'+p.desc+'</div>'
+        +'<div class="scoring-play-score">'+info.away_abbr+' '+p.away+' &mdash; '+info.home_abbr+' '+p.home+'</div>'
+        +'</div>';
+    }).join('');
+  }
+
+  function renderTeamStats(d) {
+    const info = d.info;
+    document.getElementById('stats-away-label').textContent = info.away_name;
+    document.getElementById('stats-home-label').textContent = info.home_name;
+
+    function pitcherTbody(pitchers) {
+      if (!pitchers.length) return '<tr><td colspan="7" style="color:var(--muted);padding:8px 0">No data</td></tr>';
+      return pitchers.map(function(p) {
+        return '<tr><td>'+p.name+'</td><td>'+p.ip+'</td><td>'+p.h+'</td><td>'+p.r+'</td><td>'+p.bb+'</td><td>'+p.k+'</td><td>'+p.pitches+'</td></tr>';
+      }).join('');
+    }
+    document.querySelector('#stats-away-pitchers tbody').innerHTML = pitcherTbody(d.away_pitchers);
+    document.querySelector('#stats-home-pitchers tbody').innerHTML = pitcherTbody(d.home_pitchers);
+
+    const battingStats = [['R','runs'],['H','hits'],['HR','homeRuns'],['K','strikeOuts'],['BB','baseOnBalls'],['LOB','leftOnBase']];
+    function battingGrid(bat) {
+      return battingStats.map(function(s) {
+        const val = bat[s[1]] !== undefined ? bat[s[1]] : '—';
+        return '<div class="batting-stat"><div class="batting-stat-val">'+val+'</div><div class="batting-stat-lbl">'+s[0]+'</div></div>';
+      }).join('');
+    }
+    document.getElementById('stats-away-batting').innerHTML = battingGrid(d.away_batting);
+    document.getElementById('stats-home-batting').innerHTML = battingGrid(d.home_batting);
+  }
+
+  async function playCondensed(gameId) {
+    try {
+      const res = await fetch('/api/play/'+gameId+'?feed=CONDENSED', {method:'POST'});
+      if (!res.ok) { const e=await res.json(); alert('Condensed not available: '+(e.detail||'Unknown error')); }
+    } catch(e) { alert('Error: '+e.message); }
+  }
+
   // ── TV Power (CEC) ─────────────────────────────────────────
   let tvOn = true;
   async function toggleTV() {
@@ -550,13 +2199,13 @@
         const data = await res.json();
         if (data.available) {
           document.getElementById('tv-btn').style.display = '';
-          document.getElementById('cec-row').style.display = '';
+          document.getElementById('cec-section').style.display = '';
         }
       }
     } catch(e) {}
   }
 
-  // ── Settings Modal ─────────────────────────────────────────
+  // ── Settings ───────────────────────────────────────────────
   async function loadTeams() {
     try {
       const res = await fetch('/api/teams');
@@ -574,15 +2223,46 @@
     } catch(e) {}
   }
 
+  let szSize = 'medium';
+
   async function loadSettings() {
     try {
       const res = await fetch('/api/settings');
-      if (res.ok) {
-        const data = await res.json();
-        document.getElementById('auto-start-toggle').checked = data.auto_start || false;
-        document.getElementById('cec-toggle').checked = data.cec_enabled || false;
-      }
-    } catch(e) {}
+      if (!res.ok) return;
+      const d = await res.json();
+      // Account
+      document.getElementById('settings-mlb-user').value = d.mlb_username || '';
+      const authEl = document.getElementById('settings-auth-status');
+      authEl.textContent = d.mlb_authenticated ? 'Logged in' : 'Not authenticated';
+      authEl.className = 'auth-status ' + (d.mlb_authenticated ? 'ok' : 'no');
+      // Playback
+      document.getElementById('auto-start-toggle').checked = d.auto_start || false;
+      document.getElementById('settings-default-feed').value = d.default_feed || 'HOME';
+      // Overlay
+      document.getElementById('sz-enabled-toggle').checked = d.strike_zone_enabled !== false;
+      szSize = d.strike_zone_size || 'medium';
+      selectSzSize(szSize);
+      document.getElementById('batter-intel-toggle').checked = d.batter_intel_enabled !== false;
+      document.getElementById('between-innings-toggle').checked = d.between_innings_enabled !== false;
+      // Display
+      document.getElementById('settings-resolution').value = d.resolution || '1920x1080';
+      document.getElementById('settings-fullscreen').checked = d.fullscreen !== false;
+      // Scheduler
+      document.getElementById('settings-poll-interval').value = d.poll_interval || 60;
+      document.getElementById('settings-pre-game').value = d.pre_game_minutes || 5;
+      // CEC
+      document.getElementById('cec-toggle').checked = d.cec_enabled || false;
+      document.getElementById('cec-power-off-toggle').checked = d.cec_power_off_on_stop !== false;
+      // YouTube channels
+      renderChannelList(d.suggested_channels || {});
+    } catch(e) { console.error('loadSettings error:', e); }
+  }
+
+  function selectSzSize(size) {
+    szSize = size;
+    document.querySelectorAll('.size-pill').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.size === size);
+    });
   }
 
   function openSettings() {
@@ -592,39 +2272,105 @@
       return '<span class="team-chip'+sel+'" data-abbr="'+t.abbreviation+'" onclick="toggleTeamChip(this)">'+t.abbreviation+'</span>';
     }).join('');
     loadSettings();
-    document.getElementById('settings-modal').classList.add('open');
   }
 
-  function closeSettings() {
-    document.getElementById('settings-modal').classList.remove('open');
+  function toggleTeamChip(el) { el.classList.toggle('selected'); }
+
+  // YouTube channel management
+  function renderChannelList(channels) {
+    const el = document.getElementById('channel-list');
+    const entries = Object.entries(channels);
+    if (!entries.length) { el.innerHTML = '<div style="color:var(--muted);font-size:0.82rem">No channels configured</div>'; return; }
+    el.innerHTML = entries.map(function([cid, name]) {
+      return '<div class="channel-row">'
+        +'<input class="settings-input ch-name" value="'+name+'" placeholder="Channel Name" style="width:140px" data-cid="'+cid+'">'
+        +'<input class="settings-input ch-id" value="'+cid+'" placeholder="Channel ID" style="flex:1">'
+        +'<button class="btn-remove-channel" onclick="this.parentElement.remove()">Remove</button>'
+        +'</div>';
+    }).join('');
   }
 
-  function toggleTeamChip(el) {
-    el.classList.toggle('selected');
+  function addChannelRow() {
+    const el = document.getElementById('channel-list');
+    // Clear "No channels" placeholder if present
+    if (el.querySelector('.channel-row') === null) el.innerHTML = '';
+    el.insertAdjacentHTML('beforeend',
+      '<div class="channel-row">'
+      +'<input class="settings-input ch-name" placeholder="Channel Name" style="width:140px">'
+      +'<input class="settings-input ch-id" placeholder="Channel ID (UCxxxx...)" style="flex:1">'
+      +'<button class="btn-remove-channel" onclick="this.parentElement.remove()">Remove</button>'
+      +'</div>');
+  }
+
+  function collectChannels() {
+    const channels = {};
+    document.querySelectorAll('.channel-row').forEach(function(row) {
+      const id = row.querySelector('.ch-id').value.trim();
+      const name = row.querySelector('.ch-name').value.trim();
+      if (id && name) channels[id] = name;
+    });
+    return channels;
+  }
+
+  async function saveCredentials() {
+    const user = document.getElementById('settings-mlb-user').value.trim();
+    const pass = document.getElementById('settings-mlb-pass').value.trim();
+    if (!user || !pass) { alert('Enter both username and password'); return; }
+    const btn = document.querySelector('.btn-login');
+    btn.textContent = 'Logging in...'; btn.disabled = true;
+    try {
+      const res = await fetch('/api/settings/credentials', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mlb_username: user, mlb_password: pass})
+      });
+      const data = await res.json();
+      const authEl = document.getElementById('settings-auth-status');
+      if (data.success && data.authenticated) {
+        authEl.textContent = 'Logged in'; authEl.className = 'auth-status ok';
+        btn.textContent = 'Logged in!';
+        document.getElementById('settings-mlb-pass').value = '';
+      } else {
+        authEl.textContent = data.error || 'Login failed'; authEl.className = 'auth-status no';
+        btn.textContent = 'Login failed';
+      }
+    } catch(e) { alert('Error: ' + e.message); btn.textContent = 'Login'; }
+    setTimeout(function() { btn.textContent = 'Login'; btn.disabled = false; }, 2000);
   }
 
   async function saveSettings() {
     const chips = document.querySelectorAll('.team-chip.selected');
     const teams = Array.from(chips).map(function(c) { return c.dataset.abbr; });
-    const autoStart = document.getElementById('auto-start-toggle').checked;
-    const cecEnabled = document.getElementById('cec-toggle').checked;
 
     try {
       await Promise.all([
         fetch('/api/favorites', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({teams: teams})
         }),
         fetch('/api/settings', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({auto_start: autoStart, cec_enabled: cecEnabled})
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            auto_start: document.getElementById('auto-start-toggle').checked,
+            default_feed: document.getElementById('settings-default-feed').value,
+            strike_zone_enabled: document.getElementById('sz-enabled-toggle').checked,
+            strike_zone_size: szSize,
+            batter_intel_enabled: document.getElementById('batter-intel-toggle').checked,
+            between_innings_enabled: document.getElementById('between-innings-toggle').checked,
+            resolution: document.getElementById('settings-resolution').value,
+            fullscreen: document.getElementById('settings-fullscreen').checked,
+            poll_interval: parseInt(document.getElementById('settings-poll-interval').value) || 60,
+            pre_game_minutes: parseInt(document.getElementById('settings-pre-game').value) || 5,
+            cec_enabled: document.getElementById('cec-toggle').checked,
+            cec_power_off_on_stop: document.getElementById('cec-power-off-toggle').checked,
+            suggested_channels: collectChannels(),
+          })
         })
       ]);
       favorites = new Set(teams);
-      closeSettings();
       renderGames(lastGames);
+      var btn = document.querySelector('.settings-actions .btn-primary');
+      btn.textContent = 'Saved!';
+      setTimeout(function() { btn.textContent = 'Save Settings'; }, 1500);
     } catch(e) { alert('Save failed: ' + e.message); }
   }
 
@@ -636,6 +2382,8 @@
 
     ws.onopen = function() {
       document.getElementById('ws-dot').classList.add('connected');
+      document.getElementById('ws-label').textContent = 'Connected';
+      document.getElementById('ws-label').style.color = 'var(--green)';
       clearTimeout(refreshTimer);
       clearTimeout(wsReconnectTimer);
     };
@@ -658,6 +2406,8 @@
           }
         } else if (msg.type === 'status') {
           nowPlayingId = msg.now_playing_game_id;
+          if (msg.youtube_mode) { showYtControls(true); startYtPoll(); }
+          else { showYtControls(false); stopYtPoll(); }
           updateStatus(lastGames, msg);
           renderGames(lastGames);
         } else if (msg.type === 'autoplay') {
@@ -670,8 +2420,9 @@
 
     ws.onclose = function() {
       document.getElementById('ws-dot').classList.remove('connected');
+      document.getElementById('ws-label').textContent = 'Reconnecting...';
+      document.getElementById('ws-label').style.color = 'var(--muted)';
       ws = null;
-      // Reconnect after 5s, fall back to polling
       wsReconnectTimer = setTimeout(connectWS, 5000);
       refreshTimer = setTimeout(loadGames, 30000);
     };
@@ -686,6 +2437,7 @@
     loadGames();
     loadVolume();
     checkCEC();
+    loadHistory();
     connectWS();
   }
   init();

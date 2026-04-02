@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #player { position: fixed; inset: 0; width: 100%; height: 100%; }
+    #player iframe { width: 100%; height: 100%; border: none; }
+  </style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+  // Load YouTube IFrame API
+  var tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+
+  var player;
+  var ytState = { currentTime: 0, duration: 0, state: -1, volume: 100, muted: false, playbackRate: 1, ccEnabled: false };
+
+  function onYouTubeIframeAPIReady() {
+    var params = new URLSearchParams(location.search);
+    var v = params.get('v');
+    var t = parseFloat(params.get('t') || '0');
+    if (!v) return;
+
+    player = new YT.Player('player', {
+      width: '100%',
+      height: '100%',
+      videoId: v,
+      playerVars: {
+        autoplay: 1,
+        controls: 1,
+        rel: 0,
+        modestbranding: 1,
+        fs: 1,
+        iv_load_policy: 3
+      },
+      events: {
+        onReady: function(e) {
+          e.target.playVideo();
+          if (t > 0) e.target.seekTo(t, true);
+        },
+        onStateChange: function(e) {
+          ytState.state = e.data;
+          // Video ended — mark completed and return to screensaver
+          if (e.data === 0) {
+            fetch('/api/screensaver', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({completed: true})
+            }).catch(function() {});
+          }
+        },
+        onError: function(e) { console.error('YT player error:', e.data); }
+      }
+    });
+  }
+
+  // Keep state fresh — polled by backend via evaluate()
+  setInterval(function() {
+    if (!player || typeof player.getCurrentTime !== 'function') return;
+    try {
+      ytState.currentTime = player.getCurrentTime() || 0;
+      ytState.duration    = player.getDuration()    || 0;
+      ytState.state       = player.getPlayerState();
+      ytState.volume        = player.getVolume();
+      ytState.muted         = player.isMuted();
+      ytState.playbackRate  = player.getPlaybackRate() || 1;
+    } catch(e) {}
+  }, 500);
+
+  // Commands callable from Playwright page.evaluate()
+  window.ytPlay      = function() { if (player) player.playVideo(); };
+  window.ytPause     = function() { if (player) player.pauseVideo(); };
+  window.ytSeek      = function(t) { if (player) player.seekTo(t, true); };
+  window.ytSetVolume = function(v) { if (player) player.setVolume(v); };
+  window.ytMute      = function() { if (player) player.mute(); };
+  window.ytUnmute    = function() { if (player) player.unMute(); };
+  window.ytGetState  = function() { return JSON.stringify(ytState); };
+  window.ytSetSpeed  = function(r) { if (player) { player.setPlaybackRate(parseFloat(r)); ytState.playbackRate = parseFloat(r); } };
+  window.ytSetCC     = function(on) {
+    if (!player) return;
+    if (on) { player.loadModule('cc'); player.setOption('cc', 'track', {languageCode: 'en'}); }
+    else { player.unloadModule('cc'); }
+    ytState.ccEnabled = !!on;
+  };
+</script>
+</body>
+</html>
