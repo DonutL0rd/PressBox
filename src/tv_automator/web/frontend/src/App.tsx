@@ -5,6 +5,7 @@ import TopBar from './components/TopBar';
 import Dashboard from './views/Dashboard';
 import YouTube from './views/YouTube';
 import Settings from './views/Settings';
+import Music from './views/Music';
 import './layout.css';
 
 const App: React.FC = () => {
@@ -17,6 +18,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/youtube" element={<YouTube />} />
+            <Route path="/music" element={<Music />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

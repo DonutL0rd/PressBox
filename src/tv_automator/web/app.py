@@ -722,6 +722,7 @@ if (_FRONTEND_DIST / "assets").exists():
 @app.get("/", response_class=FileResponse)
 @app.get("/youtube", response_class=FileResponse)
 @app.get("/settings", response_class=FileResponse)
+@app.get("/music", response_class=FileResponse)
 async def dashboard():
     index_file = _FRONTEND_DIST / "index.html"
     if index_file.exists():
@@ -1965,6 +1966,11 @@ async def music_album(album_id: str):
     resp = await _navidrome_api("/rest/getAlbum", {"id": album_id})
     return resp.get("album", {})
 
+@app.get("/api/music/artist/{artist_id}")
+async def music_artist(artist_id: str):
+    resp = await _navidrome_api("/rest/getArtist", {"id": artist_id})
+    return resp.get("artist", {})
+
 
 @app.get("/api/music/search")
 async def music_search(query: str = "", artistCount: int = 5, albumCount: int = 10, songCount: int = 20):
@@ -1989,10 +1995,10 @@ async def music_playlist(playlist_id: str):
     return resp.get("playlist", {})
 
 
-@app.get("/api/music/random")
-async def music_random(size: int = 50):
-    resp = await _navidrome_api("/rest/getRandomSongs", {"size": str(size)})
-    return resp.get("randomSongs", {})
+@app.get("/api/music/radio")
+async def music_radio():
+    resp = await _navidrome_api("/rest/getInternetRadioStations")
+    return resp.get("internetRadioStations", {})
 
 
 @app.get("/api/music/cover/{item_id}")

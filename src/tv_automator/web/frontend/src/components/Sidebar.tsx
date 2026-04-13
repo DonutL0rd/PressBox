@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Tv, Video, Settings, Play } from 'lucide-react';
+import { Tv, Video, Settings, Play, Music } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 
 const Sidebar: React.FC = () => {
@@ -33,6 +33,14 @@ const Sidebar: React.FC = () => {
         >
           <Video className="nav-icon" size={18} />
           <span>YouTube</span>
+        </NavLink>
+
+        <NavLink 
+          to="/music" 
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+        >
+          <Music className="nav-icon" size={18} />
+          <span>Music</span>
         </NavLink>
         
         <NavLink 
