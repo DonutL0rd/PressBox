@@ -85,55 +85,55 @@
   }
   #break-overlay.visible { opacity: 1; pointer-events: auto; }
 
-  .break-inner { max-width: 680px; width: 90%; }
+  .break-inner { max-width: 1200px; width: 92%; }
   .break-header {
-    text-align: center; margin-bottom: 28px;
+    text-align: center; margin-bottom: 48px;
   }
   .break-game-score {
-    font-size: 1.8rem; font-weight: 800; color: #d4915c;
+    font-size: 4rem; font-weight: 800; color: #d4915c;
     font-family: 'Playfair Display', Georgia, serif;
   }
-  .break-game-score .sep { color: rgba(255,255,255,0.2); margin: 0 10px; }
+  .break-game-score .sep { color: rgba(255,255,255,0.2); margin: 0 20px; }
   .break-inning-label {
-    font-size: 0.82rem; color: rgba(255,255,255,0.4); margin-top: 4px;
-    text-transform: uppercase; letter-spacing: 0.1em;
+    font-size: 1.3rem; color: rgba(255,255,255,0.4); margin-top: 10px;
+    text-transform: uppercase; letter-spacing: 0.12em;
   }
 
   .break-section {
     background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 14px; padding: 18px 20px; margin-bottom: 16px;
+    border-radius: 18px; padding: 28px 32px; margin-bottom: 24px;
   }
   .break-section-title {
-    font-size: 0.68rem; color: rgba(255,255,255,0.35); text-transform: uppercase;
-    letter-spacing: 0.08em; font-weight: 600; margin-bottom: 12px;
+    font-size: 1.1rem; color: rgba(255,255,255,0.35); text-transform: uppercase;
+    letter-spacing: 0.1em; font-weight: 600; margin-bottom: 18px;
   }
 
   /* Due up batters */
-  .due-up-row { display: flex; gap: 12px; justify-content: center; }
+  .due-up-row { display: flex; gap: 24px; justify-content: center; }
   .due-up-card {
-    flex: 1; max-width: 180px; text-align: center;
-    background: rgba(255,255,255,0.04); border-radius: 10px; padding: 14px 10px;
+    flex: 1; max-width: 340px; text-align: center;
+    background: rgba(255,255,255,0.04); border-radius: 14px; padding: 28px 20px;
   }
-  .due-up-name { font-size: 0.82rem; font-weight: 700; color: #e8e0d4; margin-bottom: 6px; }
-  .due-up-stats { font-size: 0.72rem; color: rgba(255,255,255,0.5); }
+  .due-up-name { font-size: 1.4rem; font-weight: 700; color: #e8e0d4; margin-bottom: 10px; }
+  .due-up-stats { font-size: 1.1rem; color: rgba(255,255,255,0.5); }
   .due-up-stats span { color: #d4915c; font-weight: 600; }
 
   /* Other scores */
-  .other-scores-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .other-scores-grid { display: flex; flex-wrap: wrap; gap: 14px; }
   .other-score {
-    background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;
-    font-size: 0.75rem; white-space: nowrap;
-    display: flex; gap: 8px; align-items: center;
+    background: rgba(255,255,255,0.04); border-radius: 10px; padding: 14px 20px;
+    font-size: 1.15rem; white-space: nowrap;
+    display: flex; gap: 12px; align-items: center;
   }
   .other-score .teams { color: rgba(255,255,255,0.6); }
   .other-score .score { color: #e8e0d4; font-weight: 700; }
-  .other-score .inn { color: rgba(255,255,255,0.3); font-size: 0.65rem; }
+  .other-score .inn { color: rgba(255,255,255,0.3); font-size: 1rem; }
   .other-score.live .inn { color: rgba(143,188,106,0.7); }
 
   /* Pitcher summary */
-  .pitcher-summary { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  .pitcher-summary-name { font-size: 0.88rem; font-weight: 700; color: #e8e0d4; }
-  .pitcher-summary-stats { display: flex; gap: 12px; font-size: 0.78rem; color: rgba(255,255,255,0.5); }
+  .pitcher-summary { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+  .pitcher-summary-name { font-size: 1.5rem; font-weight: 700; color: #e8e0d4; }
+  .pitcher-summary-stats { display: flex; gap: 18px; font-size: 1.2rem; color: rgba(255,255,255,0.5); }
   .pitcher-summary-stats span { color: #d4915c; font-weight: 600; }
 </style>
 </head>
@@ -216,6 +216,7 @@
   var szEnabled = true;
   var batterIntelEnabled = true;
   var breakOverlayEnabled = true;
+  var overlayDelayMs = 2000;
   var szSizeScale = { small: 0.65, medium: 1, large: 1.45 };
 
   function showStatus(msg, cls) {
@@ -237,20 +238,7 @@
     } catch(e) {}
 
     // Load overlay settings
-    if (!isCondensed) {
-      try {
-        var res = await fetch('/api/settings');
-        if (res.ok) {
-          var data = await res.json();
-          szEnabled = data.strike_zone_enabled !== false;
-          batterIntelEnabled = data.batter_intel_enabled !== false;
-          breakOverlayEnabled = data.between_innings_enabled !== false;
-          var size = data.strike_zone_size || 'medium';
-          var scale = szSizeScale[size] || 1;
-          document.getElementById('sz-overlay').style.transform = 'scale(' + scale + ')';
-        }
-      } catch(e) {}
-    }
+    if (!isCondensed) await applySettings();
 
     if (isCondensed || !szEnabled) {
       document.getElementById('sz-overlay').classList.add('hidden');
@@ -261,7 +249,37 @@
       szPollTimer = setInterval(pollPitches, 6000);
       setTimeout(pollPitches, 2000);
     }
+
+    // Re-check settings periodically so dashboard changes apply live
+    if (!isCondensed) setInterval(applySettings, 10000);
   })();
+
+  async function applySettings() {
+    try {
+      var res = await fetch('/api/settings');
+      if (!res.ok) return;
+      var data = await res.json();
+      batterIntelEnabled = data.batter_intel_enabled !== false;
+      breakOverlayEnabled = data.between_innings_enabled !== false;
+      overlayDelayMs = ((data.overlay_delay != null ? data.overlay_delay : 2) * 1000) | 0;
+      var size = data.strike_zone_size || 'medium';
+      var scale = szSizeScale[size] || 1;
+      document.getElementById('sz-overlay').style.transform = 'scale(' + scale + ')';
+
+      var wasEnabled = szEnabled;
+      szEnabled = data.strike_zone_enabled !== false;
+      if (szEnabled && !wasEnabled) {
+        document.getElementById('sz-overlay').classList.remove('hidden');
+        if (!szPollTimer) {
+          szPollTimer = setInterval(pollPitches, 6000);
+          pollPitches();
+        }
+      } else if (!szEnabled && wasEnabled) {
+        document.getElementById('sz-overlay').classList.add('hidden');
+        if (szPollTimer) { clearInterval(szPollTimer); szPollTimer = null; }
+      }
+    } catch(e) {}
+  }
 
   // ── HLS player ─────────────────────────────────────
   async function loadStream() {
@@ -486,6 +504,59 @@
     breakOverlay.classList.add('visible');
   }
 
+  var overlayUpdateTimer = null;
+
+  function applyOverlayData(data) {
+    // Between-innings break
+    if (breakOverlayEnabled) updateBreakOverlay(data.break_data);
+    else updateBreakOverlay(null);
+    if (breakActive) return;  // don't update strike zone during break
+
+    // Batter intel flash
+    if (batterIntelEnabled && data.batter_intel && data.batter_intel.is_new) {
+      showBatterCard(data.batter_intel);
+    }
+
+    if (!data.pitcher && !data.batter) {
+      szOverlay.classList.remove('visible');
+      return;
+    }
+    // Only update strike zone when it's visible (not during batter card)
+    if (biContent.style.display !== 'none') return;
+    szOverlay.classList.add('visible');
+
+    document.getElementById('sz-count').textContent = data.count || '';
+    document.getElementById('sz-inning').textContent = data.inning || '';
+    var outsText = '';
+    for (var i = 0; i < 3; i++) outsText += i < data.outs ? '\u25CF' : '\u25CB';
+    document.getElementById('sz-outs').textContent = outsText;
+    document.getElementById('sz-pitcher').textContent = shortName(data.pitcher);
+    document.getElementById('sz-batter').textContent = shortName(data.batter);
+
+    if (data.pitches.length !== lastPitchCount) {
+      lastPitchCount = data.pitches.length;
+      var svg = '';
+      for (var j = 0; j < data.pitches.length; j++) {
+        var p = data.pitches[j];
+        var cx = pxToSvgX(p.pX);
+        var cy = pzToSvgY(p.pZ);
+        var color = pitchColor(p.call);
+        var isLast = j === data.pitches.length - 1;
+        var r = isLast ? 6 : 4.5;
+        var opacity = isLast ? 1 : 0.55 + (j / data.pitches.length) * 0.35;
+        svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" '
+          + 'fill="' + color + '" opacity="' + opacity.toFixed(2) + '" '
+          + 'stroke="' + (isLast ? 'rgba(255,255,255,0.6)' : 'none') + '" stroke-width="' + (isLast ? 1.5 : 0) + '"/>';
+        if (isLast && p.speed_mph) {
+          svg += '<text x="' + cx.toFixed(1) + '" y="' + (cy - 9).toFixed(1) + '" '
+            + 'text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="8" font-weight="600">'
+            + Math.round(p.speed_mph) + '</text>';
+        }
+      }
+      szDots.innerHTML = svg;
+    }
+  }
+
   async function pollPitches() {
     if (isCondensed || !szEnabled) return;
     try {
@@ -493,53 +564,14 @@
       if (!res.ok) return;
       var data = await res.json();
 
-      // Between-innings break
-      if (breakOverlayEnabled) updateBreakOverlay(data.break_data);
-      else updateBreakOverlay(null);
-      if (breakActive) return;  // don't update strike zone during break
-
-      // Batter intel flash
-      if (batterIntelEnabled && data.batter_intel && data.batter_intel.is_new) {
-        showBatterCard(data.batter_intel);
-      }
-
-      if (!data.pitcher && !data.batter) {
-        szOverlay.classList.remove('visible');
-        return;
-      }
-      // Only update strike zone when it's visible (not during batter card)
-      if (biContent.style.display !== 'none') return;
-      szOverlay.classList.add('visible');
-
-      document.getElementById('sz-count').textContent = data.count || '';
-      document.getElementById('sz-inning').textContent = data.inning || '';
-      var outsText = '';
-      for (var i = 0; i < 3; i++) outsText += i < data.outs ? '\u25CF' : '\u25CB';
-      document.getElementById('sz-outs').textContent = outsText;
-      document.getElementById('sz-pitcher').textContent = shortName(data.pitcher);
-      document.getElementById('sz-batter').textContent = shortName(data.batter);
-
-      if (data.pitches.length !== lastPitchCount) {
-        lastPitchCount = data.pitches.length;
-        var svg = '';
-        for (var j = 0; j < data.pitches.length; j++) {
-          var p = data.pitches[j];
-          var cx = pxToSvgX(p.pX);
-          var cy = pzToSvgY(p.pZ);
-          var color = pitchColor(p.call);
-          var isLast = j === data.pitches.length - 1;
-          var r = isLast ? 6 : 4.5;
-          var opacity = isLast ? 1 : 0.55 + (j / data.pitches.length) * 0.35;
-          svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" '
-            + 'fill="' + color + '" opacity="' + opacity.toFixed(2) + '" '
-            + 'stroke="' + (isLast ? 'rgba(255,255,255,0.6)' : 'none') + '" stroke-width="' + (isLast ? 1.5 : 0) + '"/>';
-          if (isLast && p.speed_mph) {
-            svg += '<text x="' + cx.toFixed(1) + '" y="' + (cy - 9).toFixed(1) + '" '
-              + 'text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="8" font-weight="600">'
-              + Math.round(p.speed_mph) + '</text>';
-          }
-        }
-        szDots.innerHTML = svg;
+      // If break is ending (returning to live play), apply immediately — no delay
+      var breakEnding = breakActive && (!data.break_data || !data.break_data.active);
+      if (breakEnding || overlayDelayMs <= 0) {
+        clearTimeout(overlayUpdateTimer);
+        applyOverlayData(data);
+      } else {
+        clearTimeout(overlayUpdateTimer);
+        overlayUpdateTimer = setTimeout(function() { applyOverlayData(data); }, overlayDelayMs);
       }
     } catch(e) {}
   }

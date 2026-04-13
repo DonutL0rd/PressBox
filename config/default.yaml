@@ -34,4 +34,9 @@ cec:
   enabled: false
   power_off_on_stop: true
 
+navidrome:
+  server_url: ""
+  username: ""
+  password: ""
+
 data_dir: "/data"

@@ -33,7 +33,7 @@
   .container {
     position: absolute; z-index: 1;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 44px;
+    gap: 36px;
     animation: fadeIn 1.2s ease-in;
     transition: transform 8s cubic-bezier(0.45, 0.05, 0.55, 0.95);
     /* leave room on all sides so content never clips when shifted */
@@ -55,20 +55,26 @@
   #dim-overlay.dimming { opacity: 0.97; }
 
   /* Clock */
-  .clock-block { text-align: center; }
+  .clock-block { text-align: center; transition: all 0.8s ease; }
 
   .clock {
     font-size: 8rem; font-weight: 200; letter-spacing: -4px;
     color: rgba(240, 224, 200, 0.78); line-height: 1;
+    transition: font-size 0.8s ease;
   }
   .clock-date {
     font-size: 1.3rem; font-weight: 400;
     color: rgba(195, 148, 95, 0.75);
     margin-top: 10px;
+    transition: font-size 0.8s ease;
   }
 
+  /* Shrink clock when music is prominently displayed */
+  .container.has-music .clock { font-size: 5rem; letter-spacing: -2px; }
+  .container.has-music .clock-date { font-size: 1rem; margin-top: 6px; }
+
   /* Game card */
-  .upcoming { text-align: center; max-width: 720px; }
+  .upcoming { text-align: center; max-width: 720px; transition: all 0.8s ease; }
 
   .upcoming-label {
     font-size: 0.8rem; font-weight: 700;
@@ -90,17 +96,23 @@
     align-items: center;
     gap: 10px;
     box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.06);
+    transition: all 0.8s ease;
   }
   .next-game.live-game {
     border-color: rgba(0, 120, 100, 0.5);
     box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 140, 110, 0.2), inset 0 1px 0 rgba(0, 200, 160, 0.06);
   }
 
+  /* Compact game card when music is showing */
+  .container.has-music .next-game { padding: 14px 30px; gap: 7px; }
+  .container.has-music .upcoming-label { font-size: 0.7rem; margin-bottom: 10px; }
+
   .next-matchup {
     display: flex; align-items: center; gap: 28px;
   }
-  .next-team { font-size: 3rem; font-weight: 800; color: rgba(240, 224, 200, 0.78); }
-  .next-team.favorite { color: rgba(26, 154, 138, 0.82); }  /* Mariners teal */
+  .next-team { font-size: 3rem; font-weight: 800; color: rgba(240, 224, 200, 0.78); transition: font-size 0.8s ease; }
+  .next-team.favorite { color: rgba(26, 154, 138, 0.82); }
+  .container.has-music .next-team { font-size: 1.9rem; }
   .next-at { font-size: 1.1rem; color: rgba(185, 140, 80, 0.55); font-weight: 400; }
 
   .next-time { font-size: 0.95rem; color: rgba(185, 145, 95, 0.7); }
@@ -145,6 +157,87 @@
     font-size: 0.82rem;
     color: rgba(150, 110, 70, 0.4);
   }
+
+  /* ── Now Playing music (base = small) ── */
+  .now-playing-music {
+    display: flex; align-items: center; gap: 18px;
+    background: rgba(35, 16, 7, 0.75);
+    border: 1px solid rgba(100, 60, 25, 0.45);
+    border-radius: 18px;
+    padding: 18px 28px;
+    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.06);
+    max-width: 560px;
+  }
+  .npm-art {
+    width: 72px; height: 72px; border-radius: 10px; object-fit: cover;
+    flex-shrink: 0; background: rgba(20, 10, 4, 0.6);
+  }
+  .npm-info { min-width: 0; flex: 1; }
+  .npm-label {
+    font-size: 0.7rem; font-weight: 700;
+    color: rgba(26, 154, 138, 0.8);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    margin-bottom: 6px;
+  }
+  .npm-title {
+    font-size: 1.2rem; font-weight: 600;
+    color: rgba(240, 224, 200, 0.85);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .npm-artist {
+    font-size: 0.88rem; color: rgba(185, 145, 95, 0.7);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .npm-progress {
+    margin-top: 8px; display: flex; align-items: center; gap: 8px;
+  }
+  .npm-bar-bg {
+    flex: 1; height: 3px; border-radius: 2px;
+    background: rgba(100, 60, 25, 0.4);
+    overflow: hidden;
+  }
+  .npm-bar-fill {
+    height: 100%; border-radius: 2px;
+    background: rgba(26, 154, 138, 0.7);
+    transition: width 2s linear;
+  }
+  .npm-time {
+    font-size: 0.7rem; color: rgba(185, 145, 95, 0.5);
+    font-variant-numeric: tabular-nums;
+    min-width: 32px;
+  }
+
+  /* ── Medium size ── */
+  #music-block.npm-medium .now-playing-music {
+    padding: 24px 38px; gap: 26px; max-width: 740px;
+  }
+  #music-block.npm-medium .npm-art { width: 116px; height: 116px; border-radius: 14px; }
+  #music-block.npm-medium .npm-label { font-size: 0.78rem; }
+  #music-block.npm-medium .npm-title { font-size: 1.75rem; }
+  #music-block.npm-medium .npm-artist { font-size: 1.1rem; }
+  #music-block.npm-medium .npm-time { font-size: 0.76rem; min-width: 36px; }
+  #music-block.npm-medium .npm-bar-bg { height: 4px; }
+
+  /* ── Large size — vertical layout ── */
+  #music-block.npm-large .now-playing-music {
+    flex-direction: column; align-items: center; text-align: center;
+    max-width: 540px; padding: 38px 52px; gap: 18px;
+  }
+  #music-block.npm-large .npm-art {
+    width: 230px; height: 230px; border-radius: 22px; flex-shrink: 0;
+  }
+  #music-block.npm-large .npm-info { min-width: 0; width: 100%; }
+  #music-block.npm-large .npm-label { font-size: 0.82rem; margin-bottom: 8px; }
+  #music-block.npm-large .npm-title {
+    font-size: 2.5rem; font-weight: 700;
+    white-space: normal; overflow: visible; text-overflow: clip;
+    text-align: center; line-height: 1.15;
+  }
+  #music-block.npm-large .npm-artist { font-size: 1.45rem; text-align: center; }
+  #music-block.npm-large .npm-time { font-size: 0.85rem; min-width: 42px; }
+  #music-block.npm-large .npm-bar-bg { height: 5px; }
+  #music-block.npm-large .npm-progress { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -154,12 +247,15 @@
     <div class="clock" id="clock"></div>
     <div class="clock-date" id="clock-date"></div>
   </div>
+  <!-- music-block is first so it appears above the game card when playing -->
+  <div id="music-block"></div>
   <div class="upcoming" id="upcoming"></div>
   <div id="autoplay-block"></div>
 </div>
 <script>
 (function() {
   let favorites = new Set();
+  let npmSize = 'medium'; // overridden by settings
 
   const TZ = 'America/Los_Angeles';
 
@@ -201,9 +297,14 @@
         renderUpcoming(games);
       }
 
+      // Read screensaver music size setting
+      const settings = stRes.ok ? await stRes.json() : null;
+      if (settings && settings.screensaver_music_size) {
+        npmSize = settings.screensaver_music_size;
+      }
+
       // Render auto-play section
       const autoplay = apRes.ok ? await apRes.json() : null;
-      const settings = stRes.ok ? await stRes.json() : null;
       renderAutoplay(autoplay, settings);
 
     } catch(e) {
@@ -267,6 +368,56 @@
     }
   }
 
+  function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function fmtTime(s) {
+    s = Math.floor(s || 0);
+    var m = Math.floor(s / 60), sec = s % 60;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+  }
+
+  function renderMusic(music) {
+    var el = document.getElementById('music-block');
+    var container = document.getElementById('container');
+    if (!music || !music.playing) {
+      el.innerHTML = '';
+      el.className = '';
+      container.classList.remove('has-music');
+      return;
+    }
+    el.className = 'npm-' + npmSize;
+    container.classList.add('has-music');
+    var artSize = npmSize === 'large' ? 400 : npmSize === 'medium' ? 220 : 150;
+    var pct = music.duration > 0 ? Math.min(100, (music.position / music.duration) * 100) : 0;
+    var artSrc = music.song && music.song.albumId
+      ? '/api/music/cover/' + encodeURIComponent(music.song.albumId) + '?size=' + artSize
+      : '';
+    el.innerHTML = '<div class="now-playing-music">'
+      + (artSrc ? '<img class="npm-art" src="' + artSrc + '" alt="">' : '<div class="npm-art"></div>')
+      + '<div class="npm-info">'
+      + '<div class="npm-label">Now Playing</div>'
+      + '<div class="npm-title">' + escHtml((music.song && music.song.title) || '') + '</div>'
+      + '<div class="npm-artist">' + escHtml((music.song && music.song.artist) || '') + '</div>'
+      + '<div class="npm-progress">'
+      + '<span class="npm-time">' + fmtTime(music.position) + '</span>'
+      + '<div class="npm-bar-bg"><div class="npm-bar-fill" style="width:' + pct.toFixed(1) + '%"></div></div>'
+      + '<span class="npm-time">' + fmtTime(music.duration) + '</span>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  async function loadMusicStatus() {
+    try {
+      var r = await fetch('/api/music/status');
+      renderMusic(r.ok ? await r.json() : null);
+    } catch(e) {
+      renderMusic(null);
+    }
+  }
+
   function renderAutoplay(autoplay, settings) {
     const el = document.getElementById('autoplay-block');
     if (autoplay && autoplay.queued && autoplay.game_id) {
@@ -289,19 +440,16 @@
   // ── Burn-in protection ────────────────────────────────────────
 
   // Random pixel shift — moves content to a new random position every 45s.
-  // Max offset is 60px in each direction so nothing clips off screen.
   const MAX_SHIFT = 60;
   function randomShift() {
     const x = Math.round((Math.random() * 2 - 1) * MAX_SHIFT);
     const y = Math.round((Math.random() * 2 - 1) * MAX_SHIFT);
     document.getElementById('container').style.transform = 'translate(' + x + 'px, ' + y + 'px)';
   }
-  // Initial shift after fade-in completes
   setTimeout(randomShift, 1400);
   setInterval(randomShift, 45000);
 
   // Deep dim — every 20 minutes fade to near-black for 8 seconds, then restore.
-  // Gives pixels a rest and mimics OLED pixel-refresh behavior.
   const overlay = document.getElementById('dim-overlay');
   function deepDim() {
     overlay.classList.add('dimming');
@@ -315,6 +463,8 @@
   setInterval(updateClock, 1000);
   loadData();
   setInterval(loadData, 60000);
+  loadMusicStatus();
+  setInterval(loadMusicStatus, 3000);
 })();
 </script>
 </body>

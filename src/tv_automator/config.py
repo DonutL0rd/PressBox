@@ -132,6 +132,19 @@ class Config:
                 base[k] = v
 
     @property
+    def navidrome_config(self) -> dict[str, Any]:
+        return self.get("navidrome", {})
+
+    @property
+    def navidrome_credentials(self) -> tuple[str, str, str] | None:
+        """Return (server_url, username, password) or None if not configured."""
+        cfg = self.navidrome_config
+        url = os.getenv("NAVIDROME_URL") or cfg.get("server_url", "")
+        user = os.getenv("NAVIDROME_USERNAME") or cfg.get("username", "")
+        pw = os.getenv("NAVIDROME_PASSWORD") or cfg.get("password", "")
+        return (url, user, pw) if url and user and pw else None
+
+    @property
     def mlb_username(self) -> str | None:
         return os.getenv("MLB_USERNAME") or self.get("providers", {}).get("mlb", {}).get("username")
 

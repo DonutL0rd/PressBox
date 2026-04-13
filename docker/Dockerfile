@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg wget \
     python3.11 python3.11-venv python3-pip \
     xdg-utils openbox xdotool x11-utils xvfb \
-    pulseaudio alsa-utils cec-utils \
+    pulseaudio alsa-utils cec-utils mpv \
     fonts-liberation fonts-noto \
     locales dbus-x11 \
     && rm -rf /var/lib/apt/lists/*

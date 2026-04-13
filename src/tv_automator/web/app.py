@@ -6,7 +6,10 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import random
 import re
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -649,6 +652,38 @@ async def _do_stop() -> None:
     await _broadcast_status()
 
 
+async def _stop_music_internal() -> None:
+    """Stop music playback and clear the queue. Safe to call within _play_lock."""
+    global _music_queue_index, _music_watcher_task
+    if _music_watcher_task and not _music_watcher_task.done():
+        _music_watcher_task.cancel()
+        _music_watcher_task = None
+    await _mpv_stop()
+    _music_queue.clear()
+    _music_queue_index = -1
+
+
+async def _stop_video_for_music() -> None:
+    """Stop any active video playback (game or YouTube) so music can take over.
+    Navigates the browser to the screensaver. Call within _play_lock."""
+    global _now_playing_game_id, _now_playing_feed, _stream_info, _youtube_mode, _youtube_video_id, _player_levels, _player_command
+    was_playing = bool(_now_playing_game_id or _youtube_mode)
+    _stop_heartbeat()
+    _stop_expiry_timer()
+    _stop_progress_task()
+    if _youtube_mode and _youtube_video_id:
+        await _save_current_progress()
+    _now_playing_game_id = None
+    _now_playing_feed = "HOME"
+    _stream_info = None
+    _youtube_mode = False
+    _youtube_video_id = None
+    _player_levels = []
+    _player_command = None
+    if was_playing and _browser.is_running:
+        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+
+
 # ── Helpers ──────────────────────────────────────────────────────
 
 def _game_to_dict(game: Game) -> dict:
@@ -702,6 +737,7 @@ async def play_game(game_id: str, date: str | None = None, feed: str = "HOME"):
         raise HTTPException(503, "Browser not running — check DISPLAY / X11")
 
     async with _play_lock:
+        await _stop_music_internal()
         _stop_heartbeat()
         if feed.upper() == "CONDENSED":
             info = await _do_play_condensed(game_id)
@@ -759,6 +795,7 @@ async def play_youtube(body: dict):
             _now_playing_feed = "HOME"
             _stream_info = None
 
+        await _stop_music_internal()
         _youtube_mode = True
         _youtube_video_id = video_id
         await _browser.navigate(nav_url)
@@ -1494,6 +1531,7 @@ async def get_settings():
         "strike_zone_size": overlay.get("strike_zone_size", "medium"),
         "batter_intel_enabled": overlay.get("batter_intel_enabled", True),
         "between_innings_enabled": overlay.get("between_innings_enabled", True),
+        "overlay_delay": overlay.get("overlay_delay", 2),
         # Display
         "resolution": display.get("resolution", "1920x1080"),
         "fullscreen": display.get("fullscreen", True),
@@ -1505,6 +1543,8 @@ async def get_settings():
         "cec_power_off_on_stop": _config.cec.get("power_off_on_stop", True),
         # YouTube channels
         "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
+        # Screensaver
+        "screensaver_music_size": _config.get("screensaver", {}).get("music_size", "medium"),
     }
 
 
@@ -1556,6 +1596,9 @@ async def update_settings(body: dict):
         _config.update_nested("overlay", "batter_intel_enabled", value=body["batter_intel_enabled"])
     if "between_innings_enabled" in body:
         _config.update_nested("overlay", "between_innings_enabled", value=body["between_innings_enabled"])
+    if "overlay_delay" in body:
+        val = max(0, min(15, float(body["overlay_delay"])))
+        _config.update_nested("overlay", "overlay_delay", value=val)
     # Display
     if "resolution" in body:
         _config.update_nested("display", "resolution", value=body["resolution"])
@@ -1579,6 +1622,11 @@ async def update_settings(body: dict):
         SUGGESTED_CHANNELS.clear()
         SUGGESTED_CHANNELS.update(body["suggested_channels"])
         _config.update_nested("youtube", "suggested_channels", value=body["suggested_channels"])
+    # Screensaver
+    if "screensaver_music_size" in body:
+        allowed = ("small", "medium", "large")
+        sz = body["screensaver_music_size"] if body["screensaver_music_size"] in allowed else "medium"
+        _config.update_nested("screensaver", "music_size", value=sz)
     _config.save_user_config()
     log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
     return await get_settings()
@@ -1624,6 +1672,588 @@ async def cec_action(action: str):
     else:
         raise HTTPException(400, "Invalid action — use 'on' or 'off'")
     return {"success": ok}
+
+
+# ── Navidrome / Music ──────────────────────────────────────────
+
+# Server-side music playback via mpv + PulseAudio.
+# The dashboard is a remote control — audio plays on the server, not the browser.
+
+_mpv_proc: asyncio.subprocess.Process | None = None
+_mpv_socket = "/tmp/mpv-music.sock"
+_music_queue: list[dict] = []       # [{id, title, artist, albumId, duration}, ...]
+_music_queue_index: int = -1
+_music_shuffle: bool = False
+_music_repeat: str = "off"          # off, all, one
+_music_shuffle_order: list[int] = []
+
+
+def _subsonic_params() -> dict[str, str] | None:
+    """Build Subsonic API auth query params. Returns None if not configured."""
+    creds = _config.navidrome_credentials
+    if not creds:
+        return None
+    _server_url, username, password = creds
+    salt = secrets.token_hex(8)
+    token = hashlib.md5((password + salt).encode()).hexdigest()
+    return {
+        "u": username,
+        "t": token,
+        "s": salt,
+        "c": "tv-automator",
+        "v": "1.16.1",
+        "f": "json",
+    }
+
+
+def _subsonic_stream_url(song_id: str) -> str | None:
+    """Build a direct Navidrome stream URL for mpv to fetch."""
+    params = _subsonic_params()
+    if not params:
+        return None
+    params["id"] = song_id
+    params.pop("f", None)
+    server_url = _config.navidrome_credentials[0].rstrip("/")
+    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    return f"{server_url}/rest/stream?{qs}"
+
+
+async def _navidrome_api(endpoint: str, extra_params: dict | None = None) -> dict:
+    """Proxy a Subsonic API call and return the parsed subsonic-response."""
+    params = _subsonic_params()
+    if not params:
+        raise HTTPException(503, "Navidrome not configured")
+    if extra_params:
+        params.update(extra_params)
+    server_url = _config.navidrome_credentials[0].rstrip("/")
+    url = f"{server_url}{endpoint}"
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(url, params=params)
+        r.raise_for_status()
+        data = r.json()
+    resp = data.get("subsonic-response", {})
+    if resp.get("status") != "ok":
+        err = resp.get("error", {})
+        raise HTTPException(502, err.get("message", "Navidrome error"))
+    return resp
+
+
+# ── mpv IPC helpers ────────────────────────────────────────────
+
+async def _mpv_command(*args) -> dict | None:
+    """Send a JSON IPC command to the running mpv instance."""
+    try:
+        reader, writer = await asyncio.open_unix_connection(_mpv_socket)
+        cmd = json.dumps({"command": list(args)}) + "\n"
+        writer.write(cmd.encode())
+        await writer.drain()
+        line = await asyncio.wait_for(reader.readline(), timeout=2)
+        writer.close()
+        await writer.wait_closed()
+        return json.loads(line) if line else None
+    except Exception:
+        return None
+
+
+async def _mpv_get_property(prop: str):
+    """Get a property from mpv."""
+    resp = await _mpv_command("get_property", prop)
+    if resp and "data" in resp:
+        return resp["data"]
+    return None
+
+
+async def _mpv_set_property(prop: str, value):
+    """Set a property on mpv."""
+    return await _mpv_command("set_property", prop, value)
+
+
+async def _mpv_start(url: str) -> None:
+    """Start or restart mpv with a new audio URL."""
+    global _mpv_proc
+    await _mpv_stop()
+    # Remove stale socket
+    try:
+        os.unlink(_mpv_socket)
+    except FileNotFoundError:
+        pass
+    _mpv_proc = await asyncio.create_subprocess_exec(
+        "mpv",
+        "--no-video",
+        "--no-terminal",
+        f"--input-ipc-server={_mpv_socket}",
+        "--idle=once",
+        url,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    # Wait briefly for socket to appear
+    for _ in range(20):
+        if os.path.exists(_mpv_socket):
+            break
+        await asyncio.sleep(0.1)
+
+
+async def _mpv_stop() -> None:
+    """Stop the mpv process if running."""
+    global _mpv_proc
+    if _mpv_proc and _mpv_proc.returncode is None:
+        try:
+            _mpv_proc.terminate()
+            await asyncio.wait_for(_mpv_proc.wait(), timeout=3)
+        except Exception:
+            try:
+                _mpv_proc.kill()
+            except Exception:
+                pass
+    _mpv_proc = None
+
+
+def _music_build_shuffle_order() -> None:
+    """Build a shuffled index order for the queue."""
+    global _music_shuffle_order
+    _music_shuffle_order = list(range(len(_music_queue)))
+    random.shuffle(_music_shuffle_order)
+    # Move current to front
+    if _music_queue_index in _music_shuffle_order:
+        _music_shuffle_order.remove(_music_queue_index)
+        _music_shuffle_order.insert(0, _music_queue_index)
+
+
+async def _music_play_current() -> None:
+    """Play the song at the current queue index via mpv on the server."""
+    if _music_queue_index < 0 or _music_queue_index >= len(_music_queue):
+        return
+    song = _music_queue[_music_queue_index]
+    url = _subsonic_stream_url(song["id"])
+    if not url:
+        return
+    await _mpv_start(url)
+
+
+async def _music_advance(direction: int = 1) -> dict | None:
+    """Advance the queue by direction (+1 next, -1 prev). Returns new song or None."""
+    global _music_queue_index
+    if not _music_queue:
+        return None
+
+    if _music_shuffle and _music_shuffle_order:
+        cur_shuffle = _music_shuffle_order.index(_music_queue_index) if _music_queue_index in _music_shuffle_order else 0
+        next_shuffle = cur_shuffle + direction
+        if next_shuffle < 0 or next_shuffle >= len(_music_shuffle_order):
+            if _music_repeat == "all":
+                next_shuffle = next_shuffle % len(_music_shuffle_order)
+            else:
+                return None
+        _music_queue_index = _music_shuffle_order[next_shuffle]
+    else:
+        _music_queue_index += direction
+        if _music_queue_index < 0 or _music_queue_index >= len(_music_queue):
+            if _music_repeat == "all":
+                _music_queue_index = _music_queue_index % len(_music_queue)
+            else:
+                _music_queue_index = max(0, min(_music_queue_index, len(_music_queue) - 1))
+                return None
+
+    await _music_play_current()
+    return _music_queue[_music_queue_index]
+
+
+# ── mpv end-of-file watcher ───────────────────────────────────
+
+_music_watcher_task: asyncio.Task | None = None
+
+
+async def _music_watch_playback():
+    """Watch mpv for track end and auto-advance the queue."""
+    global _music_queue_index
+    while True:
+        await asyncio.sleep(1)
+        if not _mpv_proc or _mpv_proc.returncode is not None:
+            # mpv exited — track ended
+            if not _music_queue:
+                break
+            if _music_repeat == "one":
+                await _music_play_current()
+                continue
+            result = await _music_advance(1)
+            if result is None:
+                break  # End of queue
+            continue
+        # Check if mpv is idle (finished playing)
+        idle = await _mpv_get_property("idle-active")
+        if idle:
+            if _music_repeat == "one":
+                await _music_play_current()
+                continue
+            result = await _music_advance(1)
+            if result is None:
+                break
+
+
+def _music_start_watcher():
+    global _music_watcher_task
+    if _music_watcher_task and not _music_watcher_task.done():
+        _music_watcher_task.cancel()
+    _music_watcher_task = asyncio.create_task(_music_watch_playback())
+
+
+# ── Music API routes ──────────────────────────────────────────
+
+@app.get("/api/music/ping")
+async def music_ping():
+    """Test Navidrome connection."""
+    try:
+        resp = await _navidrome_api("/rest/ping")
+        return {"ok": True, "version": resp.get("version", "?")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/music/credentials")
+async def music_credentials(body: dict):
+    """Save Navidrome credentials and verify connection."""
+    server_url = body.get("server_url", "").strip().rstrip("/")
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+    if not server_url or not username or not password:
+        raise HTTPException(400, "All fields are required")
+    _config.update_nested("navidrome", "server_url", value=server_url)
+    _config.update_nested("navidrome", "username", value=username)
+    _config.update_nested("navidrome", "password", value=password)
+    _config.save_user_config()
+    try:
+        resp = await _navidrome_api("/rest/ping")
+        log.info("Navidrome connected: %s@%s", username, server_url)
+        return {"success": True, "version": resp.get("version", "?")}
+    except Exception as e:
+        log.warning("Navidrome credentials saved but ping failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/music/artists")
+async def music_artists():
+    resp = await _navidrome_api("/rest/getArtists")
+    return resp.get("artists", {})
+
+
+@app.get("/api/music/albums")
+async def music_albums(type: str = "recent", size: int = 40, offset: int = 0):
+    resp = await _navidrome_api("/rest/getAlbumList2", {
+        "type": type, "size": str(size), "offset": str(offset),
+    })
+    return resp.get("albumList2", {})
+
+
+@app.get("/api/music/album/{album_id}")
+async def music_album(album_id: str):
+    resp = await _navidrome_api("/rest/getAlbum", {"id": album_id})
+    return resp.get("album", {})
+
+
+@app.get("/api/music/search")
+async def music_search(query: str = "", artistCount: int = 5, albumCount: int = 10, songCount: int = 20):
+    resp = await _navidrome_api("/rest/search3", {
+        "query": query,
+        "artistCount": str(artistCount),
+        "albumCount": str(albumCount),
+        "songCount": str(songCount),
+    })
+    return resp.get("searchResult3", {})
+
+
+@app.get("/api/music/playlists")
+async def music_playlists():
+    resp = await _navidrome_api("/rest/getPlaylists")
+    return resp.get("playlists", {})
+
+
+@app.get("/api/music/playlist/{playlist_id}")
+async def music_playlist(playlist_id: str):
+    resp = await _navidrome_api("/rest/getPlaylist", {"id": playlist_id})
+    return resp.get("playlist", {})
+
+
+@app.get("/api/music/random")
+async def music_random(size: int = 50):
+    resp = await _navidrome_api("/rest/getRandomSongs", {"size": str(size)})
+    return resp.get("randomSongs", {})
+
+
+@app.get("/api/music/cover/{item_id}")
+async def music_cover(item_id: str, size: int = 300):
+    """Proxy album art from Navidrome with browser caching."""
+    params = _subsonic_params()
+    if not params:
+        raise HTTPException(503, "Navidrome not configured")
+    params["id"] = item_id
+    params["size"] = str(size)
+    params.pop("f", None)
+    server_url = _config.navidrome_credentials[0].rstrip("/")
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{server_url}/rest/getCoverArt", params=params)
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, "Cover art not found")
+    return Response(
+        content=r.content,
+        media_type=r.headers.get("content-type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# ── Server-side playback control ──────────────────────────────
+
+@app.post("/api/music/play")
+async def music_play(body: dict):
+    """Start playing a queue of songs on the server. Body: {songs: [...], index: 0}."""
+    global _music_queue, _music_queue_index, _music_shuffle_order
+    songs = body.get("songs", [])
+    index = body.get("index", 0)
+    if not songs:
+        raise HTTPException(400, "No songs provided")
+    async with _play_lock:
+        await _stop_video_for_music()
+    _music_queue = [
+        {"id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
+         "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0)}
+        for s in songs
+    ]
+    _music_queue_index = index
+    if _music_shuffle:
+        _music_build_shuffle_order()
+    await _music_play_current()
+    _music_start_watcher()
+    return {"playing": True, "song": _music_queue[_music_queue_index]}
+
+
+@app.post("/api/music/command")
+async def music_command(body: dict):
+    """Send a transport command. Body: {command: pause|resume|next|prev|stop|seek, value: ...}."""
+    global _music_queue_index, _music_shuffle, _music_repeat, _music_shuffle_order
+    cmd = body.get("command", "")
+
+    if cmd == "pause":
+        await _mpv_set_property("pause", True)
+        return {"ok": True}
+    elif cmd == "resume":
+        await _mpv_set_property("pause", False)
+        return {"ok": True}
+    elif cmd == "toggle":
+        paused = await _mpv_get_property("pause")
+        await _mpv_set_property("pause", not paused)
+        return {"ok": True, "paused": not paused}
+    elif cmd == "next":
+        song = await _music_advance(1)
+        return {"ok": True, "song": song}
+    elif cmd == "prev":
+        # If more than 3s in, restart; else go back
+        pos = await _mpv_get_property("time-pos")
+        if pos and pos > 3:
+            await _mpv_command("seek", 0, "absolute")
+            return {"ok": True}
+        song = await _music_advance(-1)
+        return {"ok": True, "song": song}
+    elif cmd == "stop":
+        await _mpv_stop()
+        _music_queue.clear()
+        _music_queue_index = -1
+        return {"ok": True}
+    elif cmd == "seek":
+        val = body.get("value", 0)
+        await _mpv_command("seek", val, "absolute")
+        return {"ok": True}
+    elif cmd == "volume":
+        val = max(0, min(100, float(body.get("value", 100))))
+        await _mpv_set_property("volume", val)
+        return {"ok": True}
+    elif cmd == "jump":
+        idx = int(body.get("value", 0))
+        if 0 <= idx < len(_music_queue):
+            _music_queue_index = idx
+            await _music_play_current()
+            _music_start_watcher()
+            return {"ok": True}
+        raise HTTPException(400, "Invalid queue index")
+    elif cmd == "shuffle":
+        _music_shuffle = body.get("value", not _music_shuffle)
+        if _music_shuffle:
+            _music_build_shuffle_order()
+        else:
+            _music_shuffle_order.clear()
+        return {"ok": True, "shuffle": _music_shuffle}
+    elif cmd == "repeat":
+        modes = ["off", "all", "one"]
+        idx = modes.index(_music_repeat) if _music_repeat in modes else 0
+        _music_repeat = modes[(idx + 1) % 3]
+        return {"ok": True, "repeat": _music_repeat}
+    else:
+        raise HTTPException(400, f"Unknown command: {cmd}")
+
+
+@app.get("/api/music/status")
+async def music_status():
+    """Get current music playback state from the server-side mpv player."""
+    playing = _mpv_proc is not None and _mpv_proc.returncode is None
+    song = _music_queue[_music_queue_index] if 0 <= _music_queue_index < len(_music_queue) else None
+    result = {
+        "playing": playing,
+        "song": song,
+        "queue_length": len(_music_queue),
+        "queue_index": _music_queue_index,
+        "shuffle": _music_shuffle,
+        "repeat": _music_repeat,
+        "position": 0,
+        "duration": 0,
+        "paused": False,
+    }
+    if playing:
+        result["position"] = await _mpv_get_property("time-pos") or 0
+        result["duration"] = await _mpv_get_property("duration") or 0
+        result["paused"] = await _mpv_get_property("pause") or False
+        result["volume"] = await _mpv_get_property("volume") or 100
+    return result
+
+
+@app.get("/api/music/sinks")
+async def music_sinks():
+    """List available PulseAudio output sinks on the server."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "list", "sinks", "short",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        sinks = []
+        for line in stdout.decode().strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                sinks.append({"id": parts[0], "name": parts[1], "state": parts[4] if len(parts) > 4 else ""})
+        # Also get the default sink
+        proc2 = await asyncio.create_subprocess_exec(
+            "pactl", "get-default-sink",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout2, _ = await proc2.communicate()
+        default_sink = stdout2.decode().strip()
+        return {"sinks": sinks, "default": default_sink}
+    except Exception as e:
+        log.exception("Failed to list sinks")
+        return {"sinks": [], "default": "", "error": str(e)}
+
+
+@app.post("/api/music/sink")
+async def music_set_sink(body: dict):
+    """Set the default PulseAudio output sink on the server."""
+    sink_name = body.get("sink", "")
+    if not sink_name:
+        raise HTTPException(400, "Sink name required")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pactl", "set-default-sink", sink_name,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise HTTPException(500, f"Failed to set sink: {stderr.decode()}")
+        # Also move the running mpv stream to the new sink
+        if _mpv_proc and _mpv_proc.returncode is None:
+            # Find mpv's sink input and move it
+            proc2 = await asyncio.create_subprocess_exec(
+                "pactl", "list", "sink-inputs", "short",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout2, _ = await proc2.communicate()
+            for line in stdout2.decode().strip().split("\n"):
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 1:
+                    input_id = parts[0]
+                    await asyncio.create_subprocess_exec(
+                        "pactl", "move-sink-input", input_id, sink_name,
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    )
+        return {"ok": True, "sink": sink_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/music/queue")
+async def music_get_queue():
+    """Return the current playback queue and active index."""
+    return {"songs": _music_queue, "index": _music_queue_index}
+
+
+@app.post("/api/music/queue/append")
+async def music_queue_append(body: dict):
+    """Append songs to the queue without stopping current playback."""
+    global _music_queue_index, _music_shuffle_order
+    songs = body.get("songs", [])
+    if not songs:
+        raise HTTPException(400, "No songs provided")
+    for s in songs:
+        _music_queue.append({
+            "id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
+            "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0),
+        })
+    if _music_shuffle:
+        _music_build_shuffle_order()
+    # If nothing was playing, start from the first appended song
+    if _music_queue_index < 0:
+        async with _play_lock:
+            await _stop_video_for_music()
+        _music_queue_index = 0
+        await _music_play_current()
+        _music_start_watcher()
+    return {"ok": True, "queue_length": len(_music_queue)}
+
+
+@app.post("/api/music/queue/remove")
+async def music_queue_remove(body: dict):
+    """Remove a song from the queue by index."""
+    global _music_queue_index
+    idx = body.get("index")
+    if idx is None or idx < 0 or idx >= len(_music_queue):
+        raise HTTPException(400, "Invalid index")
+    _music_queue.pop(idx)
+    if _music_shuffle:
+        _music_build_shuffle_order()
+    if idx < _music_queue_index:
+        _music_queue_index -= 1
+    elif idx == _music_queue_index:
+        if _music_queue:
+            _music_queue_index = min(_music_queue_index, len(_music_queue) - 1)
+            await _music_play_current()
+            _music_start_watcher()
+        else:
+            _music_queue_index = -1
+            await _mpv_stop()
+    return {"ok": True, "queue_length": len(_music_queue)}
+
+
+@app.get("/api/music/starred")
+async def music_starred():
+    """Get starred (favourited) songs, albums, and artists."""
+    resp = await _navidrome_api("/rest/getStarred2")
+    return resp.get("starred2", {})
+
+
+@app.post("/api/music/star")
+async def music_star(body: dict):
+    """Star or unstar a song/album/artist."""
+    item_id = body.get("id")
+    action = body.get("action", "star")  # "star" or "unstar"
+    if not item_id:
+        raise HTTPException(400, "ID required")
+    endpoint = "/rest/star" if action == "star" else "/rest/unstar"
+    await _navidrome_api(endpoint, {"id": item_id})
+    return {"ok": True}
 
 
 # ── Health ──────────────────────────────────────────────────────
