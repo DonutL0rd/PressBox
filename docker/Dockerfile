@@ -1,3 +1,11 @@
+# ── Frontend Build Stage ─────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY src/tv_automator/web/frontend/package*.json ./
+RUN npm install
+COPY src/tv_automator/web/frontend/ ./
+RUN npm run build
+
 # ── TV-Automator Docker Image ────────────────────────────────────
 # Ubuntu base with Google Chrome (Widevine DRM), Python/FastAPI,
 # nginx reverse proxy, and a minimal window manager for HDMI output.
@@ -53,6 +61,8 @@ RUN pip install --no-cache-dir playwright \
 # ── Copy application code ────────────────────────────────────────
 
 COPY src/ /app/src/
+# Copy the built React assets from the node buider stage
+COPY --from=frontend-builder /app/frontend/dist/ /app/src/tv_automator/web/frontend/dist/
 COPY config/ /app/config/
 
 RUN pip install --no-cache-dir -e .
