@@ -1,8 +1,15 @@
 .music-container {
   display: flex;
-  flex-direction: column;
   height: calc(100vh - 40px); /* Fill most of screen */
   gap: 24px;
+  position: relative;
+}
+
+.music-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .music-tabs {
@@ -104,10 +111,11 @@
   justify-content: space-between;
   padding: 16px 24px;
   border-radius: 16px;
-  margin-top: auto;
   background: rgba(10, 10, 20, 0.8);
   border: 1px solid rgba(0, 255, 170, 0.2);
   box-shadow: 0 8px 32px rgba(0, 255, 170, 0.1);
+  margin-top: 16px;
+  flex-shrink: 0;
 }
 
 .now-playing-info {
@@ -152,4 +160,132 @@
 
 .btn-icon.active {
   color: var(--neon-green);
+  background: rgba(0, 255, 170, 0.1);
+}
+
+/* Volume Slider */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 'auto';
+  width: 150px;
+}
+
+.volume-slider {
+  -webkit-appearance: none;
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 2px;
+  outline: none;
+}
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.volume-slider::-webkit-slider-thumb:hover {
+  background: var(--neon-green);
+  transform: scale(1.2);
+}
+
+/* Track List */
+.track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.track-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  transition: background 0.2s;
+}
+.track-item:hover {
+  background: rgba(255,255,255,0.05);
+}
+.track-number {
+  color: var(--text-tertiary);
+  width: 24px;
+  text-align: right;
+  font-size: 0.9rem;
+}
+.track-title {
+  flex: 1;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+}
+.track-duration {
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
+}
+
+/* Queue Panel */
+.queue-panel {
+  width: 320px;
+  background: var(--color-surface);
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  flex-shrink: 0;
+}
+
+.queue-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.queue-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+}
+.queue-item.active {
+  background: rgba(0, 255, 170, 0.1);
+  border-left: 2px solid var(--neon-green);
+}
+.queue-item-info {
+  flex: 1;
+  overflow: hidden;
+}
+.queue-item-title {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.queue-item-artist {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
 }
