@@ -83,7 +83,13 @@ const VideoCard: React.FC<{
   const hasProgress = progress > 0 && !completed;
 
   return (
-    <div className="yt-card" onClick={() => onPlay(videoId, hasProgress ? position : 0)}>
+    <div
+      className="yt-card"
+      onClick={() => onPlay(videoId, hasProgress ? position : 0)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPlay(videoId, hasProgress ? position : 0); } }}
+    >
       {/* Thumbnail */}
       <div className="yt-card-thumb">
         {thumbnail ? (

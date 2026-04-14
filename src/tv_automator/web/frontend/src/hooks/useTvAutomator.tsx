@@ -111,7 +111,8 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
           const data = JSON.parse(event.data);
           if (data.type === 'status') {
             console.log('[TvAutomator] WS status →', data);
-            setStatus(prev => ({ ...prev, ...data }));
+            const { type: _type, ...statusUpdate } = data;
+            setStatus(prev => ({ ...prev, ...statusUpdate }));
           } else if (data.type === 'games') {
             if (Array.isArray(data.games)) {
               setGames(data.games);

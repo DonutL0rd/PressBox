@@ -731,6 +731,19 @@ async def dashboard():
     return HTMLResponse("React frontend not built. Run 'npm run build' in src/tv_automator/web/frontend.")
 
 
+@app.get("/{filename}", include_in_schema=False)
+async def serve_root_asset(filename: str):
+    """Serve root-level public assets from the React dist directory (e.g. favicon.svg)."""
+    # os.path.basename strips any directory component, preventing path traversal
+    safe_name = os.path.basename(filename)
+    if not safe_name:
+        raise HTTPException(status_code=404)
+    file_path = _FRONTEND_DIST / safe_name
+    if file_path.is_file():
+        return FileResponse(str(file_path))
+    raise HTTPException(status_code=404)
+
+
 @app.get("/api/games")
 async def get_games(date: str | None = None):
     target = datetime.fromisoformat(date) if date else datetime.now()

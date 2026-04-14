@@ -33,6 +33,9 @@ const GameListItem: React.FC<{
     <div
       className={`gli ${isLive ? 'gli--live' : ''} ${isSelected ? 'gli--selected' : ''} ${isPlaying ? 'gli--playing' : ''}`}
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div className="gli-left">
         <div className="gli-teams">
