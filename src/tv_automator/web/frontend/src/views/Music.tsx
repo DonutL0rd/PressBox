@@ -28,7 +28,7 @@ const Music: React.FC = () => {
     try {
       const r = await fetch('/api/music/queue');
       const q = await r.json();
-      setQueue(q.queue || []);
+      setQueue(q.songs || []);
       setQueueIdx(q.index);
     } catch (e) {}
   };

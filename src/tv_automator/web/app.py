@@ -720,6 +720,7 @@ if (_FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
 
 @app.get("/", response_class=FileResponse)
+@app.get("/mlb", response_class=FileResponse)
 @app.get("/youtube", response_class=FileResponse)
 @app.get("/settings", response_class=FileResponse)
 @app.get("/music", response_class=FileResponse)

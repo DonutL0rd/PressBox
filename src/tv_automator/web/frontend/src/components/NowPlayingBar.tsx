@@ -1,33 +1,43 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Power, Tv } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
+import { useLocation } from 'react-router-dom';
 import './NowPlayingBar.css';
 
 const NowPlayingBar: React.FC = () => {
   const { status, games, stopPlayback } = useTvAutomator();
+  const location = useLocation();
 
   const [musicStatus, setMusicStatus] = useState<any>(null);
   const [vol, setVol] = useState(50);
   const [isMuted, setIsMuted] = useState(false);
+  const volTimeout = useRef<any>(null);
 
   const fetchStatus = async () => {
     try {
-      const [stRes, vRes] = await Promise.all([
-        fetch('/api/music/status'),
-        fetch('/api/volume'),
-      ]);
-      setMusicStatus(await stRes.json());
-      const v = await vRes.json();
-      setVol(v.volume);
-      setIsMuted(v.muted);
+      const stRes = await fetch('/api/music/status');
+      if (stRes.ok) setMusicStatus(await stRes.json());
+
+      const vRes = await fetch('/api/volume');
+      if (vRes.ok) {
+        const v = await vRes.json();
+        if (!volTimeout.current) {
+          setVol(v.volume);
+          setIsMuted(v.muted);
+        }
+      }
     } catch {}
   };
 
+  // Don't poll when the NowPlaying page is already handling it
+  const isOnNowPlaying = location.pathname === '/';
+
   useEffect(() => {
+    if (isOnNowPlaying) return;
     fetchStatus();
-    const iv = setInterval(fetchStatus, 2000);
+    const iv = setInterval(fetchStatus, 3000);
     return () => clearInterval(iv);
-  }, []);
+  }, [isOnNowPlaying]);
 
   const sendCommand = async (cmd: string) => {
     await fetch('/api/music/command', {
@@ -41,15 +51,24 @@ const NowPlayingBar: React.FC = () => {
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value);
     setVol(val);
-    fetch(`/api/volume?level=${val}`, { method: 'POST' });
+    if (volTimeout.current) clearTimeout(volTimeout.current);
+    volTimeout.current = setTimeout(() => {
+      fetch(`/api/volume?level=${val}`, { method: 'POST' });
+      volTimeout.current = null;
+    }, 150);
   };
 
   const toggleMute = () => {
-    fetch(`/api/volume?mute=${!isMuted}`, { method: 'POST' }).then(fetchStatus);
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    fetch(`/api/volume?mute=${newMuted}`, { method: 'POST' }).then(fetchStatus);
   };
 
+  // Don't render when on the NowPlaying page (it has its own controls)
+  if (isOnNowPlaying) return null;
+
   const isPlayingGame = !!status.now_playing_game_id;
-  const isPlayingYoutube = status.youtube_mode;
+  const isPlayingYoutube = status.youtube_mode && !isPlayingGame;
   const musicSong = musicStatus?.song;
   const isMusicPlaying = !!(musicSong && !isPlayingGame && !isPlayingYoutube);
 
@@ -73,7 +92,7 @@ const NowPlayingBar: React.FC = () => {
           </>
         )}
 
-        {isPlayingYoutube && !isPlayingGame && (
+        {isPlayingYoutube && (
           <>
             <div className="npb-icon-box npb-youtube">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

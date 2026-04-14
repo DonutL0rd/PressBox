@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Power, Shuffle, Repeat, Repeat1, Tv, Monitor, Subtitles, Layers } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Power, Shuffle, Repeat, Repeat1, Tv, Monitor, Subtitles, Layers, Heart, Trash2, Music } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 import './NowPlaying.css';
 
@@ -10,6 +10,20 @@ const fmt = (sec: number) => {
   return `${m}:${s}`;
 };
 
+const firePost = (url: string, body?: any) => {
+  fetch(url, {
+    method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  }).catch(() => {});
+};
+
+// Animated equalizer bars for the active track
+const EqBars: React.FC = () => (
+  <div className="eq-bars">
+    <span className="eq-bar" /><span className="eq-bar" /><span className="eq-bar" /><span className="eq-bar" />
+  </div>
+);
+
 const NowPlaying: React.FC = () => {
   const { status, games, stopPlayback } = useTvAutomator();
 
@@ -19,6 +33,7 @@ const NowPlaying: React.FC = () => {
   const [vol, setVol] = useState(50);
   const [isMuted, setIsMuted] = useState(false);
   const volTimeout = useRef<any>(null);
+  const [isLiked, setIsLiked] = useState(false);
 
   // Global Controls State
   const [settings, setSettings] = useState<any>({});
@@ -26,111 +41,195 @@ const NowPlaying: React.FC = () => {
   const [cec, setCec] = useState<any>({});
   const [ccEnabled, setCcEnabled] = useState(false);
 
-  // Local position ticker for smooth progress bar
+  // Local position for smooth progress bar
   const [localPos, setLocalPos] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isSeeking, setIsSeeking] = useState(false);
 
-  const fetchAll = async () => {
+  // ── Polling ────────────────────────────────────────────────
+
+  const fetchFast = useCallback(async () => {
     try {
-      const [stRes, qRes, vRes, setRes, lvlRes, cecRes] = await Promise.all([
+      const [stRes, vRes] = await Promise.all([
         fetch('/api/music/status'),
-        fetch('/api/music/queue'),
         fetch('/api/volume'),
-        fetch('/api/settings'),
-        fetch('/api/player/levels'),
-        fetch('/api/cec/status'),
       ]);
       if (stRes.ok) {
         const st = await stRes.json();
         setMusic(st);
-        setLocalPos(st.position ?? 0);
-      }
-      if (qRes.ok) {
-        const q = await qRes.json();
-        setQueue(q.queue || []);
-        setQueueIdx(q.index ?? -1);
+        // Only overwrite position if user isn't actively seeking
+        if (!isSeeking) setLocalPos(st.position ?? 0);
       }
       if (vRes.ok) {
         const v = await vRes.json();
-        setVol(v.volume);
-        setIsMuted(v.muted);
+        if (!volTimeout.current) {
+          setVol(v.volume);
+          setIsMuted(v.muted);
+        }
       }
+    } catch {}
+  }, [isSeeking]);
+
+  const fetchSlow = useCallback(async () => {
+    try {
+      const [setRes, lvlRes, cecRes, qRes] = await Promise.all([
+        fetch('/api/settings'),
+        fetch('/api/player/levels'),
+        fetch('/api/cec/status'),
+        fetch('/api/music/queue'),
+      ]);
       if (setRes.ok) setSettings(await setRes.json());
       if (lvlRes.ok) setLevels((await lvlRes.json()).levels || []);
       if (cecRes.ok) setCec(await cecRes.json());
+      if (qRes.ok) {
+        const q = await qRes.json();
+        setQueue(q.songs || []);
+        setQueueIdx(q.index ?? -1);
+      }
     } catch {}
-  };
-
-  useEffect(() => {
-    fetchAll();
-    const iv = setInterval(fetchAll, 3000);
-    return () => clearInterval(iv);
   }, []);
 
-  // Tick position forward locally for smooth progress
+  useEffect(() => {
+    fetchFast();
+    fetchSlow();
+    const fastIv = setInterval(fetchFast, 3000);
+    const slowIv = setInterval(fetchSlow, 15000);
+    return () => { clearInterval(fastIv); clearInterval(slowIv); };
+  }, [fetchFast, fetchSlow]);
+
+  // Smooth progress ticker
   useEffect(() => {
     if (tickRef.current) clearInterval(tickRef.current);
-    if (music?.playing && !music?.paused) {
+    if (music?.playing && !music?.paused && !isSeeking) {
       tickRef.current = setInterval(() => {
         setLocalPos(p => Math.min(p + 1, music?.duration ?? p));
       }, 1000);
     }
     return () => { if (tickRef.current) clearInterval(tickRef.current); };
-  }, [music?.playing, music?.paused, music?.duration]);
+  }, [music?.playing, music?.paused, music?.duration, isSeeking]);
 
-  const cmdMusic = async (command: string) => {
-    await fetch('/api/music/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command }),
-    });
-    fetchAll();
+  // ── Music Commands — optimistic + fire-and-forget ──────────
+
+  const cmdToggle = () => {
+    setMusic((prev: any) => prev ? { ...prev, paused: !prev.paused } : prev);
+    firePost('/api/music/command', { command: 'toggle' });
   };
 
-  const seekMusic = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const cmdNext = () => {
+    setLocalPos(0);
+    if (queue.length > 0) {
+      const nextIdx = (queueIdx + 1) % queue.length;
+      setQueueIdx(nextIdx);
+      setMusic((prev: any) => prev ? { ...prev, song: queue[nextIdx], paused: false } : prev);
+    }
+    firePost('/api/music/command', { command: 'next' });
+    setTimeout(fetchSlow, 500);
+  };
+
+  const cmdPrev = () => {
+    setLocalPos(0);
+    // If more than 3s in, just restart the song (server handles this)
+    if (localPos > 3) {
+      firePost('/api/music/command', { command: 'prev' });
+      return;
+    }
+    if (queue.length > 0 && queueIdx > 0) {
+      const prevIdx = queueIdx - 1;
+      setQueueIdx(prevIdx);
+      setMusic((prev: any) => prev ? { ...prev, song: queue[prevIdx], paused: false } : prev);
+    }
+    firePost('/api/music/command', { command: 'prev' });
+    setTimeout(fetchSlow, 500);
+  };
+
+  const cmdShuffle = () => {
+    setMusic((prev: any) => prev ? { ...prev, shuffle: !prev.shuffle } : prev);
+    firePost('/api/music/command', { command: 'shuffle' });
+  };
+
+  const cmdRepeat = () => {
+    const modes = ['off', 'all', 'one'];
+    const cur = music?.repeat || 'off';
+    const idx = modes.indexOf(cur);
+    const next = modes[(idx + 1) % 3];
+    setMusic((prev: any) => prev ? { ...prev, repeat: next } : prev);
+    firePost('/api/music/command', { command: 'repeat' });
+  };
+
+  const cmdJump = (index: number) => {
+    setQueueIdx(index);
+    setLocalPos(0);
+    setMusic((prev: any) => prev ? { ...prev, song: queue[index], paused: false } : prev);
+    firePost('/api/music/command', { command: 'jump', value: index });
+    setTimeout(fetchSlow, 500);
+  };
+
+  const cmdRemoveFromQueue = (index: number) => {
+    // Optimistic remove
+    setQueue(prev => prev.filter((_, i) => i !== index));
+    if (index < queueIdx) setQueueIdx(prev => prev - 1);
+    firePost('/api/music/queue/remove', { index });
+  };
+
+  const cmdStop = () => {
+    setMusic(null);
+    setQueue([]);
+    setQueueIdx(-1);
+    setLocalPos(0);
+    firePost('/api/music/command', { command: 'stop' });
+  };
+
+  // ── Like/Star ──────────────────────────────────────────────
+
+  const toggleLike = () => {
+    const song = music?.song;
+    if (!song) return;
+    const newLiked = !isLiked;
+    setIsLiked(newLiked);
+    firePost('/api/music/star', { id: song.id, action: newLiked ? 'star' : 'unstar' });
+  };
+
+  // ── Seek — with drag tracking ─────────────────────────────
+
+  const onSeekStart = () => setIsSeeking(true);
+  const onSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const pos = parseFloat(e.target.value);
     setLocalPos(pos);
-    await fetch('/api/music/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: 'seek', position: pos }),
-    });
   };
+  const onSeekEnd = () => {
+    setIsSeeking(false);
+    firePost('/api/music/command', { command: 'seek', value: localPos });
+  };
+
+  // ── Volume ─────────────────────────────────────────────────
 
   const handleVol = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value);
     setVol(val);
     if (volTimeout.current) clearTimeout(volTimeout.current);
     volTimeout.current = setTimeout(() => {
-      fetch(`/api/volume?level=${val}`, { method: 'POST' });
+      fetch(`/api/volume?level=${val}`, { method: 'POST' }).catch(() => {});
+      volTimeout.current = null;
     }, 150);
   };
 
   const toggleMute = () => {
-    fetch(`/api/volume?mute=${!isMuted}`, { method: 'POST' }).then(fetchAll);
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    fetch(`/api/volume?mute=${newMuted}`, { method: 'POST' }).catch(() => {});
   };
 
-  const updateSetting = async (payload: any) => {
+  // ── Settings + Player ──────────────────────────────────────
+
+  const updateSetting = (payload: any) => {
     setSettings((prev: any) => ({ ...prev, ...payload }));
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    firePost('/api/settings', payload);
   };
 
-  const sendPlayerCommand = async (cmd: any) => {
-    await fetch('/api/player/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cmd)
-    });
-  };
+  const sendPlayerCommand = (cmd: any) => firePost('/api/player/command', cmd);
+  const toggleCec = (action: 'on' | 'off') => firePost(`/api/cec/${action}`);
 
-  const toggleCec = async (action: 'on' | 'off') => {
-    await fetch(`/api/cec/${action}`, { method: 'POST' });
-    fetchAll();
-  };
+  // ── Derived state ──────────────────────────────────────────
 
   const isPlayingGame    = !!status.now_playing_game_id;
   const isPlayingYoutube = status.youtube_mode && !isPlayingGame;
@@ -143,6 +242,7 @@ const NowPlaying: React.FC = () => {
   const duration = music?.duration ?? 0;
   const progress = duration > 0 ? (localPos / duration) * 100 : 0;
   const RepeatIcon = music?.repeat === 'one' ? Repeat1 : Repeat;
+  const isPaused  = music?.paused ?? true;
 
   return (
     <div className="np-page animate-in">
@@ -151,7 +251,7 @@ const NowPlaying: React.FC = () => {
         {isIdle && (
           <div className="np-idle">
             <div className="np-idle-icon">
-              <Play size={48} />
+              <Music size={48} />
             </div>
             <h2 className="np-idle-title">Nothing Playing</h2>
             <p className="np-idle-sub">Start a game, YouTube video, or music to see it here.</p>
@@ -166,7 +266,6 @@ const NowPlaying: React.FC = () => {
               <span className="live-pulse-dot" />
               {game?.status_label ?? 'LIVE'}
             </div>
-
             {game ? (
               <div className="np-matchup">
                 <div className="np-team">
@@ -174,12 +273,10 @@ const NowPlaying: React.FC = () => {
                   <div className="np-team-name">{game.away_team.name}</div>
                   <div className="np-team-score">{game.away_team.score ?? '—'}</div>
                 </div>
-
                 <div className="np-vs">
                   <span>vs</span>
                   <div className="np-game-meta">{game.venue}</div>
                 </div>
-
                 <div className="np-team">
                   <div className="np-team-abbr">{game.home_team.abbreviation}</div>
                   <div className="np-team-name">{game.home_team.name}</div>
@@ -189,7 +286,6 @@ const NowPlaying: React.FC = () => {
             ) : (
               <div className="np-tv-label">Game Playing on TV</div>
             )}
-
             <button className="btn btn-primary np-stop" onClick={stopPlayback}>
               <Power size={16} /> Stop Playback
             </button>
@@ -215,13 +311,15 @@ const NowPlaying: React.FC = () => {
           </div>
         )}
 
-        {/* ── Music ─────────────────────────────────────────── */}
+        {/* ── Music Player ──────────────────────────────────── */}
         {isMusicActive && (
           <div className="np-music">
             <div
               className="np-music-bg"
               style={{ backgroundImage: `url(/api/music/cover/${song.albumId || song.id}?size=300)` }}
             />
+
+            {/* Player column */}
             <div className="np-music-main">
               <img
                 src={`/api/music/cover/${song.albumId || song.id}?size=300`}
@@ -229,49 +327,87 @@ const NowPlaying: React.FC = () => {
                 alt="Album art"
                 onError={(e: any) => { e.target.style.display = 'none'; }}
               />
+
               <div className="np-song-info">
                 <div className="np-song-title">{song.title}</div>
                 <div className="np-song-artist">{song.artist}</div>
               </div>
+
+              {/* Progress */}
               <div className="np-progress-wrap">
                 <span className="np-time">{fmt(localPos)}</span>
                 <input
                   type="range"
                   className="np-progress-bar"
                   min={0} max={duration || 1} step={1}
-                  value={localPos} onChange={seekMusic}
+                  value={localPos}
+                  onMouseDown={onSeekStart}
+                  onTouchStart={onSeekStart}
+                  onChange={onSeekChange}
+                  onMouseUp={onSeekEnd}
+                  onTouchEnd={onSeekEnd}
                   style={{ '--pct': `${progress}%` } as React.CSSProperties}
                 />
-                <span className="np-time">{fmt(duration)}</span>
+                <span className="np-time np-time--remaining">-{fmt(Math.max(0, duration - localPos))}</span>
               </div>
+
+              {/* Transport */}
               <div className="np-transport">
-                <button className={`btn-icon np-aux ${music?.shuffle ? 'np-aux--on' : ''}`} onClick={() => cmdMusic('shuffle')} title="Shuffle"><Shuffle size={18} /></button>
-                <button className="btn-icon np-skip" onClick={() => cmdMusic('prev')}><SkipBack size={26} fill="currentColor" /></button>
-                <button className="btn-icon np-playpause" onClick={() => cmdMusic('toggle')}>
-                  {music?.paused ? <Play size={32} fill="currentColor" /> : <Pause size={32} fill="currentColor" />}
+                <button className={`btn-icon np-aux ${music?.shuffle ? 'np-aux--on' : ''}`} onClick={cmdShuffle} title="Shuffle"><Shuffle size={18} /></button>
+                <button className="btn-icon np-skip" onClick={cmdPrev} title="Previous"><SkipBack size={26} fill="currentColor" /></button>
+                <button className="btn-icon np-playpause" onClick={cmdToggle}>
+                  {isPaused ? <Play size={32} fill="currentColor" /> : <Pause size={32} fill="currentColor" />}
                 </button>
-                <button className="btn-icon np-skip" onClick={() => cmdMusic('next')}><SkipForward size={26} fill="currentColor" /></button>
-                <button className={`btn-icon np-aux ${music?.repeat !== 'off' ? 'np-aux--on' : ''}`} onClick={() => cmdMusic('repeat')} title="Repeat"><RepeatIcon size={18} /></button>
+                <button className="btn-icon np-skip" onClick={cmdNext} title="Next"><SkipForward size={26} fill="currentColor" /></button>
+                <button className={`btn-icon np-aux ${music?.repeat !== 'off' ? 'np-aux--on' : ''}`} onClick={cmdRepeat} title="Repeat"><RepeatIcon size={18} /></button>
+              </div>
+
+              {/* Like + Stop row */}
+              <div className="np-extra-row">
+                <button className={`btn-icon np-heart ${isLiked ? 'np-heart--on' : ''}`} onClick={toggleLike} title={isLiked ? 'Remove from Liked' : 'Add to Liked'}>
+                  <Heart size={20} fill={isLiked ? 'var(--neon-green)' : 'none'} />
+                </button>
+                <button className="btn-icon np-stop-music" onClick={cmdStop} title="Stop & clear queue">
+                  <Power size={18} />
+                </button>
               </div>
             </div>
             
-            {/* Music Queue merged into main content side */}
+            {/* Queue panel */}
             <div className="np-queue-panel">
               <div className="np-queue-header">
-                <span>Up Next</span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{queue.length} tracks</span>
+                <span>Queue</span>
+                <span className="np-queue-count">{queue.length} tracks</span>
               </div>
               <div className="np-queue-list">
-                {queue.map((t, i) => (
-                  <div key={`${t.id}-${i}`} className={`np-queue-item ${i === queueIdx ? 'active' : ''}`}>
-                    <div className="np-queue-num">{i + 1}</div>
-                    <div className="np-queue-info">
-                      <div className="np-queue-title">{t.title}</div>
-                      <div className="np-queue-artist">{t.artist}</div>
+                {queue.map((t, i) => {
+                  const isActive = i === queueIdx;
+                  return (
+                    <div
+                      key={`${t.id}-${i}`}
+                      className={`np-queue-item ${isActive ? 'active' : ''}`}
+                      onClick={() => !isActive && cmdJump(i)}
+                    >
+                      <div className="np-queue-num">
+                        {isActive && !isPaused ? <EqBars /> : (isActive ? <Pause size={12} /> : i + 1)}
+                      </div>
+                      <div className="np-queue-info">
+                        <div className="np-queue-title">{t.title}</div>
+                        <div className="np-queue-artist">{t.artist}</div>
+                      </div>
+                      <span className="np-queue-dur">{fmt(t.duration)}</span>
+                      {!isActive && (
+                        <button
+                          className="btn-icon np-queue-rm"
+                          onClick={e => { e.stopPropagation(); cmdRemoveFromQueue(i); }}
+                          title="Remove"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
-                    {i === queueIdx && <span className="live-pulse-dot" style={{ flexShrink: 0 }} />}
-                  </div>
-                ))}
+                  );
+                })}
                 {queue.length === 0 && <div className="np-queue-empty">Queue is empty</div>}
               </div>
             </div>
@@ -279,36 +415,25 @@ const NowPlaying: React.FC = () => {
         )}
       </div>
 
-      {/* ── Central Universal Controls Bar ──────────────────────────────────── */}
+      {/* ── Global Controls Sidebar ──────────────────────────── */}
       <aside className="np-sidebar glass-panel">
         <h3 className="np-sidebar-title">Global Controls</h3>
 
-        {/* Universal Volume */}
         <div className="np-control-group">
           <div className="np-cg-label"><Volume2 size={14}/> Volume</div>
           <div className="np-vol-row">
             <button className="btn-icon" onClick={toggleMute}>
               {isMuted || vol === 0 ? <VolumeX size={18} color="var(--text-secondary)" /> : <Volume2 size={18} color="var(--text-secondary)" />}
             </button>
-            <input
-              type="range"
-              className="volume-slider np-vol-slider"
-              min={0} max={100}
-              value={vol}
-              onChange={handleVol}
-            />
+            <input type="range" className="volume-slider np-vol-slider" min={0} max={100} value={vol} onChange={handleVol} />
             <span className="np-vol-label">{isMuted ? 0 : vol}%</span>
           </div>
         </div>
 
-        {/* Streams Controls */}
         {(isPlayingGame || isPlayingYoutube) && levels.length > 0 && (
           <div className="np-control-group">
             <div className="np-cg-label"><Monitor size={14}/> Quality</div>
-            <select 
-              className="np-select"
-              onChange={e => sendPlayerCommand({ command: 'quality', level: parseInt(e.target.value) })}
-            >
+            <select className="np-select" onChange={e => sendPlayerCommand({ command: 'quality', level: parseInt(e.target.value) })}>
               <option value="-1">Auto</option>
               {levels.map((lvl: any, i: number) => (
                 <option key={i} value={i}>{lvl.height ? `${lvl.height}p` : `Level ${i}`} {lvl.bitrate ? `(${Math.round(lvl.bitrate/1000)}k)` : ''}</option>
@@ -323,45 +448,31 @@ const NowPlaying: React.FC = () => {
             <div className="np-switch-row">
               <span className="np-switch-text">Enable Subtitles</span>
               <label className="switch">
-                <input type="checkbox" checked={ccEnabled} onChange={e => {
-                  setCcEnabled(e.target.checked);
-                  sendPlayerCommand({ command: 'captions', enabled: e.target.checked });
-                }} />
+                <input type="checkbox" checked={ccEnabled} onChange={e => { setCcEnabled(e.target.checked); sendPlayerCommand({ command: 'captions', enabled: e.target.checked }); }} />
                 <span className="slider"></span>
               </label>
             </div>
           </div>
         )}
 
-        {/* Overlays (MLB) */}
         {isPlayingGame && (
           <div className="np-control-group">
             <div className="np-cg-label"><Layers size={14}/> Overlays</div>
             <div className="np-switch-row">
               <span className="np-switch-text">Strike Zone</span>
-              <label className="switch">
-                <input type="checkbox" checked={!!settings.strike_zone_enabled} onChange={e => updateSetting({ strike_zone_enabled: e.target.checked })} />
-                <span className="slider"></span>
-              </label>
+              <label className="switch"><input type="checkbox" checked={!!settings.strike_zone_enabled} onChange={e => updateSetting({ strike_zone_enabled: e.target.checked })} /><span className="slider"></span></label>
             </div>
             <div className="np-switch-row" style={{ marginTop: '8px' }}>
               <span className="np-switch-text">Batter Intel</span>
-              <label className="switch">
-                <input type="checkbox" checked={!!settings.batter_intel_enabled} onChange={e => updateSetting({ batter_intel_enabled: e.target.checked })} />
-                <span className="slider"></span>
-              </label>
+              <label className="switch"><input type="checkbox" checked={!!settings.batter_intel_enabled} onChange={e => updateSetting({ batter_intel_enabled: e.target.checked })} /><span className="slider"></span></label>
             </div>
             <div className="np-switch-row" style={{ marginTop: '8px' }}>
               <span className="np-switch-text">Innings Breaks</span>
-              <label className="switch">
-                <input type="checkbox" checked={!!settings.between_innings_enabled} onChange={e => updateSetting({ between_innings_enabled: e.target.checked })} />
-                <span className="slider"></span>
-              </label>
+              <label className="switch"><input type="checkbox" checked={!!settings.between_innings_enabled} onChange={e => updateSetting({ between_innings_enabled: e.target.checked })} /><span className="slider"></span></label>
             </div>
           </div>
         )}
 
-        {/* TV Power */}
         {cec.available && (
           <div className="np-control-group" style={{ marginTop: 'auto' }}>
             <div className="np-cg-label"><Power size={14}/> CEC TV Power</div>
