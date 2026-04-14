@@ -78,9 +78,6 @@ class MLBSession:
 
     async def login(self, username: str, password: str) -> bool:
         """Authenticate with MLB.TV via Okta password grant."""
-        self._username = username
-        self._password = password
-
         try:
             resp = await self._request(
                 "POST", OKTA_TOKEN_URL,
@@ -103,6 +100,10 @@ class MLBSession:
             log.exception("Okta login request failed")
             return False
 
+        # Only persist credentials after Okta confirms they're valid — otherwise a bad
+        # password would overwrite a previously-working one and break background re-auth.
+        self._username = username
+        self._password = password
         self._apply_token_response(data)
         log.info("Okta login successful (token expires in %ds)", data.get("expires_in", 0))
 

@@ -1653,16 +1653,25 @@ async def update_credentials(body: dict):
     password = body.get("mlb_password", "").strip()
     if not username or not password:
         raise HTTPException(400, "Username and password are required")
-    _config.update_nested("providers", "mlb", "username", value=username)
-    _config.update_nested("providers", "mlb", "password", value=password)
-    _config.save_user_config()
+
+    # Attempt login BEFORE persisting — we don't want to save credentials
+    # that we know are invalid, since the startup flow would retry them forever.
     ok = await _session.login(username, password)
+
     if ok:
+        _config.update_nested("providers", "mlb", "username", value=username)
+        _config.update_nested("providers", "mlb", "password", value=password)
+        _config.save_user_config()
         log.info("Credentials updated and login successful for %s", username)
+        # Refresh the schedule right away so the Dashboard sees games immediately
+        # instead of waiting for the next poll cycle.
+        asyncio.create_task(_scheduler.refresh())
+        await _broadcast_status()
         return {"success": True, "authenticated": True}
-    else:
-        log.warning("Credentials updated but login failed for %s", username)
-        return {"success": False, "authenticated": False, "error": "Login failed — check username/password"}
+
+    log.warning("Login failed for %s — credentials not saved", username)
+    await _broadcast_status()
+    return {"success": False, "authenticated": False, "error": "Login failed — check username/password"}
 
 
 # ── Screen power ────────────────────────────────────────────────

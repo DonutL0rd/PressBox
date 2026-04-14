@@ -1,154 +1,532 @@
-.game-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 24px;
-}
-
-.game-card {
-  padding: 24px;
-  border-radius: 20px;
+.dash {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 24px 32px;
+  overflow: hidden;
+}
+
+/* ── Top Bar ── */
+.dash-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  flex-shrink: 0;
+}
+
+.dash-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dash-date-label {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 140px;
+  text-align: center;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--trans-fast);
+}
+
+.btn-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.dash-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: 30px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--trans-fast);
+}
+
+.filter-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border-color: var(--border-active);
+}
+
+.filter-pill.active {
+  background: var(--neon-cyan-dim);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+
+.pill-count {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+}
+
+.auth-warn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 42, 95, 0.1);
+  border: 1px solid rgba(255, 42, 95, 0.4);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 24px;
+  color: var(--neon-red);
+  font-size: 0.875rem;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* ── Body Layout ── */
+.dash-body {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 32px;
+  flex: 1;
+  min-height: 0; /* allows children to scroll */
+}
+
+/* ── Side List & Detail Container ── */
+.dash-list, .dash-detail {
+  min-height: 0;
+  height: 100%;
+}
+
+.dash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* custom scrollbar for list */
+.dash-list::-webkit-scrollbar { width: 4px; }
+.dash-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+.dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.dash-empty p {
+  font-size: 0.95rem;
+}
+
+.dash-empty--lg {
+  height: 100%;
+}
+
+/* ── Game List Item ── */
+.gli {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
   transition: all var(--trans-spring);
   position: relative;
   overflow: hidden;
 }
 
-.game-card:hover {
-  transform: translateY(-4px);
+.gli:hover {
+  background: rgba(255, 255, 255, 0.04);
   border-color: var(--border-active);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08);
+  transform: translateY(-2px);
 }
 
-.game-card::before {
+.gli--selected {
+  background: rgba(0, 229, 255, 0.05);
+  border-color: rgba(0, 229, 255, 0.3);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+}
+
+.gli--live {
+  border-color: rgba(0, 255, 170, 0.2);
+}
+
+.gli--playing {
+  border-color: var(--neon-green);
+  background: rgba(0, 255, 170, 0.05);
+}
+
+.gli::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
-  background: var(--border-subtle);
-  transition: all var(--trans-smooth);
+  width: 3px;
+  background: transparent;
+  transition: background var(--trans-smooth);
 }
 
-.game-card:hover::before {
-  background: var(--border-neon);
+.gli--selected::before {
+  background: var(--neon-cyan);
 }
 
-.game-card.live::before {
+.gli--playing::before {
   background: var(--neon-green);
-  box-shadow: 0 0 15px var(--neon-green-dim);
 }
 
-.card-header {
+.gli-teams {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
-.status-badge {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 12px;
-  border-radius: 20px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
-.status-badge.live {
-  color: var(--neon-green);
-  border-color: rgba(0, 255, 170, 0.4);
-  background: rgba(0, 255, 170, 0.08);
-  box-shadow: inset 0 0 10px rgba(0,255,170,0.1);
-}
-
-.game-time {
-  font-size: 0.85rem;
+.gli-at {
+  font-size: 0.9rem;
   color: var(--text-tertiary);
   font-weight: 500;
 }
 
-.matchup-row {
+.gli-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-
-.team-col {
-  display: flex;
-  flex-direction: column;
-}
-
-.team-col.right {
-  align-items: flex-end;
-}
-
-.team-abbr {
-  font-size: 2.4rem;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--text-primary);
-  text-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  margin-bottom: 4px;
-}
-
-.team-score {
-  font-family: var(--font-mono);
-  font-size: 1.6rem;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-.separator {
-  font-size: 1.4rem;
-  color: var(--text-tertiary);
-  font-weight: 600;
-  opacity: 0.3;
+.gli-status--live {
+  color: var(--neon-green);
 }
 
-.card-foot {
-  margin-top: auto;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 20px;
-}
-
-.play-actions {
+.gli-score {
   display: flex;
-  gap: 12px;
-}
-
-.flex-1 { flex: 1; }
-
-.not-watchable {
-  font-size: 0.85rem;
-  color: var(--text-tertiary);
-  text-align: center;
-  padding: 8px 0;
-  font-style: italic;
-}
-
-.date-nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.current-date {
-  font-weight: 600;
-  font-size: 0.95rem;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
-.empty-state {
-  grid-column: 1 / -1;
+/* ── Detail Panel ── */
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-radius: 24px;
+  padding: 32px;
+  overflow-y: auto;
+}
+
+.detail-panel::-webkit-scrollbar { width: 4px; }
+.detail-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* ── Detail Head ── */
+.detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-bottom: 32px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.detail-head-teams {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-team {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 80px 0;
+  flex: 1;
+}
+
+.detail-team-abbr {
+  font-size: 3.5rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  margin-bottom: 4px;
+  text-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.detail-team-name {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.detail-team-score {
+  font-family: var(--font-mono);
+  font-size: 4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.detail-vs {
+  font-size: 2rem;
+  font-weight: 700;
   color: var(--text-tertiary);
+  opacity: 0.4;
+  padding: 0 24px;
+}
+
+.detail-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.detail-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.detail-status--live {
+  color: var(--neon-green);
+}
+
+.detail-play-row {
+  display: flex;
+  justify-content: center;
   gap: 16px;
+  margin-top: 8px;
+}
+
+/* ── Sections ── */
+.detail-section {
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.detail-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+}
+
+/* ── Linescore ── */
+.linescore-wrap {
+  overflow-x: auto;
+}
+
+.linescore {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.linescore th {
+  color: var(--text-tertiary);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.linescore td {
+  padding: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid transparent; /* Keeps spacing */
+}
+
+.linescore .ls-team {
+  text-align: left;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.linescore .ls-total {
+  font-weight: 700;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ── Pitcher Grid / Scoring / Batting ── */
+.pp-row {
+  display: flex;
+  gap: 32px;
+  font-size: 1rem;
+}
+
+.pitcher-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+.pitcher-team-head {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 8px;
+}
+
+.pitcher-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.pitcher-table th {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  padding: 6px 8px;
+}
+
+.pitcher-table td {
+  padding: 6px 8px;
+  color: var(--text-secondary);
+}
+
+.pitcher-table th:first-child,
+.pitcher-table td:first-child {
+  text-align: left;
+  color: var(--text-primary);
+}
+
+.pitcher-note {
+  color: var(--neon-cyan);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.scoring-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scoring-item {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.scoring-inning {
+  font-weight: 700;
+  color: var(--text-tertiary);
+  min-width: 32px;
+}
+
+.scoring-desc {
+  flex: 1;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.scoring-score {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.batting-totals {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.batting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: var(--font-mono);
+}
+
+.batting-team {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  min-width: 48px;
+}
+
+.muted {
+  color: var(--text-tertiary);
+}
+
+.detail-loading,
+.detail-error {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-secondary);
+}
+
+.detail-error {
+  color: var(--neon-red);
 }

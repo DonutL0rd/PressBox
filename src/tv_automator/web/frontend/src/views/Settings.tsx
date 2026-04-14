@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save } from 'lucide-react';
+import { useTvAutomator } from '../hooks/useTvAutomator';
 import './Settings.css';
 
 const Settings: React.FC = () => {
+  const navigate = useNavigate();
+  const { refreshStatus, refreshGames } = useTvAutomator();
+
   // MLB State
   const [mlbUsername, setMlbUsername] = useState('');
   const [mlbPassword, setMlbPassword] = useState('');
@@ -64,9 +69,16 @@ const Settings: React.FC = () => {
         showToast("MLB Credentials Saved & Verified!");
         setMlbAuthenticated(true);
         setMlbPassword(''); // Clear password field for security layout
+        // Immediately pull fresh status + games so the TopBar "Auth OK" and
+        // Dashboard games populate without waiting on the WebSocket.
+        await refreshStatus();
+        // Give the backend scheduler a moment to finish refreshing, then pull games.
+        setTimeout(() => { refreshGames(); }, 500);
+        setTimeout(() => navigate('/'), 1000); // Navigate to Dashboard after toast
       } else {
         showToast(data.error || "MLB Auth Failed", true);
         setMlbAuthenticated(false);
+        await refreshStatus();
       }
     } catch (err) {
       showToast("Network Error", true);

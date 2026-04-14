@@ -129,6 +129,21 @@ body {
   100% { background-position: 200% 0; }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.live-pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--neon-green);
+  animation: pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
 /* Standardized Buttons */
 .btn {
   display: inline-flex;

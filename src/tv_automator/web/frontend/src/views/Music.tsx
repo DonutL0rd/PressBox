@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Disc, Radio as RadioIcon, User, Mic, ListMusic, Volume2, VolumeX, Plus, Trash2 } from 'lucide-react';
+import { Play, Disc, Radio as RadioIcon, User, Mic, ListMusic, Plus, Trash2 } from 'lucide-react';
 import './Music.css';
 
 type Tab = 'Albums' | 'Artists' | 'Radio';
@@ -19,12 +19,6 @@ const Music: React.FC = () => {
   const [selectedArtist, setSelectedArtist] = useState<any>(null); // holds artist object
   const [selectedAlbum, setSelectedAlbum] = useState<any>(null);   // holds populated album object (with tracks)
 
-  // Subsystem states
-  const [nowPlaying, setNowPlaying] = useState<any>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [vol, setVol] = useState(50);
-  const [isMuted, setIsMuted] = useState(false);
-  
   // Queue state
   const [showQueue, setShowQueue] = useState(false);
   const [queue, setQueue] = useState<any[]>([]);
@@ -32,21 +26,10 @@ const Music: React.FC = () => {
 
   const fetchSubsystems = async () => {
     try {
-      const [stRes, qRes, vRes] = await Promise.all([
-        fetch('/api/music/status'),
-        fetch('/api/music/queue'),
-        fetch('/api/volume')
-      ]);
-      const st = await stRes.json();
-      const q = await qRes.json();
-      const v = await vRes.json();
-      
-      setNowPlaying(st.song);
-      setIsPaused(st.paused);
+      const r = await fetch('/api/music/queue');
+      const q = await r.json();
       setQueue(q.queue || []);
       setQueueIdx(q.index);
-      setVol(v.volume);
-      setIsMuted(v.muted);
     } catch (e) {}
   };
 
@@ -112,16 +95,6 @@ const Music: React.FC = () => {
     }
   };
 
-  // Commands
-  const sendCommand = async (cmd: string) => {
-    await fetch('/api/music/command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: cmd })
-    });
-    fetchSubsystems();
-  };
-
   const playTracks = async (songs: any[], index: number = 0) => {
     await fetch('/api/music/play', {
       method: 'POST',
@@ -149,12 +122,6 @@ const Music: React.FC = () => {
     fetchSubsystems();
   };
 
-  const handleVolumeChange = (e: any) => {
-    const val = parseInt(e.target.value);
-    setVol(val);
-    fetch(`/api/volume?level=${val}`, { method: 'POST' });
-  };
-
   return (
     <div className="view-container animate-in music-container">
       <div className="music-content">
@@ -163,6 +130,9 @@ const Music: React.FC = () => {
             <h1 className="page-title">Music</h1>
             <p className="page-subtitle">Subsonic / Navidrome Integrations</p>
           </div>
+          <button className={`btn-icon ${showQueue ? 'active' : ''}`} onClick={() => setShowQueue(!showQueue)} title="Toggle Queue">
+            <ListMusic size={20} />
+          </button>
         </div>
 
         {!selectedAlbum ? (
@@ -259,46 +229,6 @@ const Music: React.FC = () => {
           </div>
         )}
 
-        <div className="transport-bar">
-          {nowPlaying ? (
-            <div className="now-playing-info">
-              <img src={`/api/music/cover/${nowPlaying.albumId || nowPlaying.id}`} className="now-playing-art" alt="Cover" />
-              <div>
-                <div style={{fontWeight: 600, color: 'var(--neon-green)'}}>{nowPlaying.title}</div>
-                <div style={{fontSize: '0.85rem', color: 'var(--text-secondary)'}}>{nowPlaying.artist}</div>
-              </div>
-            </div>
-          ) : (
-            <div className="now-playing-info" style={{color: 'var(--text-secondary)'}}>
-              Not Playing
-            </div>
-          )}
-          
-          <div className="transport-controls">
-            <button className="btn-icon" onClick={() => sendCommand('prev')}><SkipBack size={24} /></button>
-            <button className="btn-icon" style={{background: 'rgba(0, 255, 170, 0.1)', color: 'var(--neon-green)', padding: '12px'}} onClick={() => sendCommand('toggle')}>
-              {isPaused || !nowPlaying ? <Play size={24} fill="currentColor" /> : <Pause size={24} fill="currentColor" />}
-            </button>
-            <button className="btn-icon" onClick={() => sendCommand('next')}><SkipForward size={24} /></button>
-          </div>
-
-          <div className="volume-control">
-            <button className="btn-icon" onClick={() => fetch(`/api/volume?mute=${!isMuted}`, {method:'POST'})}>
-               {isMuted || vol === 0 ? <VolumeX size={18} color="var(--text-secondary)" /> : <Volume2 size={18} color="var(--text-secondary)" />}
-            </button>
-            <input 
-              type="range" 
-              className="volume-slider" 
-              min="0" max="100" 
-              value={vol} 
-              onChange={handleVolumeChange} 
-            />
-          </div>
-          
-          <button className={`btn-icon ${showQueue ? 'active' : ''}`} style={{marginLeft: '16px'}} onClick={() => setShowQueue(!showQueue)}>
-            <ListMusic size={20} />
-          </button>
-        </div>
       </div>
 
       {showQueue && (

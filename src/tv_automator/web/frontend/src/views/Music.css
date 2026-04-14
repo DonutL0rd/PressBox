@@ -1,6 +1,6 @@
 .music-container {
   display: flex;
-  height: calc(100vh - 40px); /* Fill most of screen */
+  height: 100%;
   gap: 24px;
   position: relative;
 }

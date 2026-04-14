@@ -38,6 +38,8 @@ interface TvAutomatorContextType {
   playGame: (gameId: string, feed?: string) => Promise<void>;
   stopPlayback: () => Promise<void>;
   playYoutube: (url: string) => Promise<void>;
+  refreshStatus: () => Promise<void>;
+  refreshGames: () => Promise<void>;
 }
 
 const defaultStatus: Status = {
@@ -55,13 +57,43 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [status, setStatus] = useState<Status>(defaultStatus);
   const [connected, setConnected] = useState<boolean>(false);
 
+  const refreshStatus = async () => {
+    try {
+      const r = await fetch('/api/status');
+      if (!r.ok) return;
+      const data = await r.json();
+      console.log('[TvAutomator] /api/status →', data);
+      setStatus(prev => ({ ...prev, ...data }));
+    } catch (e) {
+      console.error('refreshStatus failed', e);
+    }
+  };
+
+  const refreshGames = async () => {
+    try {
+      const r = await fetch('/api/games');
+      if (!r.ok) return;
+      const data = await r.json();
+      console.log('[TvAutomator] /api/games →', Array.isArray(data) ? `${data.length} games` : data);
+      if (Array.isArray(data)) setGames(data);
+    } catch (e) {
+      console.error('refreshGames failed', e);
+    }
+  };
+
   useEffect(() => {
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
+    let pollTimer: ReturnType<typeof setInterval>;
+
+    // Belt-and-braces: REST-fetch on mount as a source of truth
+    // independent of the WebSocket.
+    refreshStatus();
+    refreshGames();
 
     const connect = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -72,7 +104,8 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'status') {
-            setStatus(data);
+            console.log('[TvAutomator] WS status →', data);
+            setStatus(prev => ({ ...prev, ...data }));
           } else if (data.type === 'games') {
             setGames(data.games);
           }
@@ -94,8 +127,16 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
 
     connect();
 
+    // Fallback poll — if the WS ever silently stops delivering, this keeps
+    // status + games fresh. 15s is cheap and imperceptible.
+    pollTimer = setInterval(() => {
+      refreshStatus();
+      refreshGames();
+    }, 15000);
+
     return () => {
       clearTimeout(reconnectTimer);
+      clearInterval(pollTimer);
       if (ws) ws.close();
     };
   }, []);
@@ -129,7 +170,7 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   };
 
   return (
-    <TvAutomatorContext.Provider value={{ games, status, connected, playGame, stopPlayback, playYoutube }}>
+    <TvAutomatorContext.Provider value={{ games, status, connected, playGame, stopPlayback, playYoutube, refreshStatus, refreshGames }}>
       {children}
     </TvAutomatorContext.Provider>
   );
