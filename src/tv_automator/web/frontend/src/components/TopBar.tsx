@@ -28,19 +28,19 @@ const TopBar: React.FC = () => {
       </div>
 
       <div className="top-controls">
-        <div title="Auth Status" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '16px' }}>
-            {status.authenticated ? (
-              <CheckCircle size={16} color="var(--neon-green)" />
-            ) : (
-              <XCircle size={16} color="var(--text-tertiary)" />
-            )}
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)'}}>
-                {status.authenticated ? "Auth OK" : "No Auth"}
-            </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '12px' }}>
+          {status.authenticated ? (
+            <CheckCircle size={14} color="var(--green)" />
+          ) : (
+            <XCircle size={14} color="var(--text-tertiary)" />
+          )}
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+            {status.authenticated ? 'Auth OK' : 'No Auth'}
+          </span>
         </div>
 
         {(isPlayingGame || isPlayingYoutube) && (
-          <button className="btn btn-primary" onClick={stopPlayback} style={{ backgroundColor: 'var(--neon-red)', color: '#fff' }}>
+          <button className="btn" onClick={stopPlayback} style={{ background: 'var(--red)', color: '#fff', border: 'none', fontSize: '0.8rem', padding: '6px 12px' }}>
             <Power size={14} /> Stop
           </button>
         )}

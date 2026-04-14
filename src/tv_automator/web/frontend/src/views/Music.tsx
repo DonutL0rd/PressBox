@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Play, Disc, Radio as RadioIcon, User, Mic, ListMusic, Plus, Trash2 } from 'lucide-react';
+import { useTvAutomator } from '../hooks/useTvAutomator';
 import './Music.css';
 
 type Tab = 'Albums' | 'Artists' | 'Radio';
@@ -12,32 +13,18 @@ const formatTime = (sec: number) => {
 };
 
 const Music: React.FC = () => {
+  const { queue: queueState } = useTvAutomator();
+
   const [activeTab, setActiveTab] = useState<Tab>('Albums');
   const [items, setItems] = useState<any[]>([]);
-  
-  // Drill-down states
-  const [selectedArtist, setSelectedArtist] = useState<any>(null); // holds artist object
-  const [selectedAlbum, setSelectedAlbum] = useState<any>(null);   // holds populated album object (with tracks)
 
-  // Queue state
+  const [selectedArtist, setSelectedArtist] = useState<any>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<any>(null);
+
   const [showQueue, setShowQueue] = useState(false);
-  const [queue, setQueue] = useState<any[]>([]);
-  const [queueIdx, setQueueIdx] = useState(-1);
 
-  const fetchSubsystems = async () => {
-    try {
-      const r = await fetch('/api/music/queue');
-      const q = await r.json();
-      setQueue(q.songs || []);
-      setQueueIdx(q.index);
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    fetchSubsystems();
-    const iv = setInterval(fetchSubsystems, 2000);
-    return () => clearInterval(iv);
-  }, []);
+  const queue = queueState.songs;
+  const queueIdx = queueState.index;
 
   // Fetch library data based on tab
   useEffect(() => {
@@ -46,7 +33,7 @@ const Music: React.FC = () => {
     setSelectedAlbum(null);
     let endpoint = '';
     let extract = (d: any) => d;
-    
+
     if (activeTab === 'Albums') {
       endpoint = '/api/music/albums';
       extract = (d: any) => d.album || [];
@@ -66,7 +53,6 @@ const Music: React.FC = () => {
     }
   }, [activeTab]);
 
-  // When viewing an artist, fetch their albums
   useEffect(() => {
     if (selectedArtist && activeTab === 'Artists') {
       fetch(`/api/music/artist/${selectedArtist.id}`)
@@ -81,11 +67,9 @@ const Music: React.FC = () => {
       return;
     }
     if (activeTab === 'Radio') {
-      // Direct play for radio
       playTracks([{ id: item.id, title: item.name, artist: 'Internet Radio' }]);
       return;
     }
-    // It's an album — fetch tracklist
     try {
       const r = await fetch(`/api/music/album/${item.id}`);
       const data = await r.json();
@@ -101,7 +85,6 @@ const Music: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ songs, index })
     });
-    fetchSubsystems();
   };
 
   const appendToQueue = async (songs: any[]) => {
@@ -110,7 +93,6 @@ const Music: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ songs })
     });
-    fetchSubsystems();
   };
 
   const removeQueueItem = async (index: number) => {
@@ -119,7 +101,6 @@ const Music: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ index })
     });
-    fetchSubsystems();
   };
 
   return (
@@ -139,20 +120,20 @@ const Music: React.FC = () => {
           <>
             <div className="music-tabs">
               <button className={`music-tab ${activeTab === 'Albums' ? 'active' : ''}`} onClick={() => setActiveTab('Albums')}>
-                <Disc size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/> 
+                <Disc size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/>
                 Recent Albums
               </button>
               <button className={`music-tab ${activeTab === 'Artists' ? 'active' : ''}`} onClick={() => setActiveTab('Artists')}>
-                <User size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/> 
+                <User size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/>
                 Artists
               </button>
               <button className={`music-tab ${activeTab === 'Radio' ? 'active' : ''}`} onClick={() => setActiveTab('Radio')}>
-                <RadioIcon size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/> 
+                <RadioIcon size={16} style={{display:'inline', marginRight: 6, verticalAlign:'text-bottom'}}/>
                 Internet Radio
               </button>
             </div>
 
-            <div className="music-grid glass-panel" style={{flex: 1, padding: '24px', marginTop: '16px'}}>
+            <div className="music-grid" style={{flex: 1, padding: '16px', marginTop: '12px', background: 'var(--color-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px'}}>
               {activeTab === 'Artists' && selectedArtist && (
                 <div style={{gridColumn: '1 / -1', marginBottom: '16px'}}>
                   <button className="btn" onClick={() => { setSelectedArtist(null); }}>
@@ -161,7 +142,7 @@ const Music: React.FC = () => {
                   <h2 style={{marginTop: '16px'}}>{selectedArtist.name} Albums</h2>
                 </div>
               )}
-              
+
               {items.map((item: any, idx: number) => (
                 <div key={`${item.id}-${idx}`} className="media-card" onClick={() => handleCardClick(item)}>
                   {(activeTab === 'Radio' || (!item.coverArt && !item.id)) ? (
@@ -169,17 +150,17 @@ const Music: React.FC = () => {
                       {activeTab === 'Radio' ? <RadioIcon size={48} color="var(--text-tertiary)" /> : <Mic size={48} color="var(--text-tertiary)" />}
                     </div>
                   ) : (
-                    <img 
-                      src={`/api/music/cover/${activeTab === 'Artists' && !selectedArtist ? item.id : item.coverArt || item.id}`} 
-                      className="media-art" 
-                      alt={item.title || item.name} 
+                    <img
+                      src={`/api/music/cover/${activeTab === 'Artists' && !selectedArtist ? item.id : item.coverArt || item.id}`}
+                      className="media-art"
+                      alt={item.title || item.name}
                       onError={(e: any) => { e.target.style.display = 'none'; }}
                     />
                   )}
                   <div className="media-info">
                     <div className="media-title">{item.title || item.name}</div>
                     <div className="media-subtitle">
-                      {activeTab === 'Artists' && !selectedArtist 
+                      {activeTab === 'Artists' && !selectedArtist
                         ? `${item.albumCount || 0} Albums`
                         : item.artist || item.homePageUrl || ''}
                     </div>
@@ -190,16 +171,15 @@ const Music: React.FC = () => {
             </div>
           </>
         ) : (
-          /* Album Tracklist View */
-          <div className="glass-panel" style={{flex: 1, padding: '24px', display: 'flex', flexDirection: 'column'}}>
+          <div style={{flex: 1, padding: '20px', display: 'flex', flexDirection: 'column', background: 'var(--color-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px'}}>
             <button className="btn" style={{alignSelf: 'flex-start', marginBottom: '24px'}} onClick={() => setSelectedAlbum(null)}>
               &larr; Back to Library
             </button>
             <div style={{display: 'flex', gap: '24px', marginBottom: '24px'}}>
-              <img 
-                src={`/api/music/cover/${selectedAlbum.coverArt || selectedAlbum.id}?size=200`} 
+              <img
+                src={`/api/music/cover/${selectedAlbum.coverArt || selectedAlbum.id}?size=200`}
                 style={{width: '200px', height: '200px', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.3)'}}
-                alt="" 
+                alt=""
               />
               <div style={{display: 'flex', flexDirection: 'column', justifyContent: 'flex-end'}}>
                 <h1 style={{fontSize: '2rem', marginBottom: '8px'}}>{selectedAlbum.title || selectedAlbum.name}</h1>

@@ -442,6 +442,32 @@ async def _broadcast_autoplay_state() -> None:
         await _broadcast({"type": "autoplay", "queued": False, "game_id": None})
 
 
+async def _broadcast_settings() -> None:
+    """Broadcast current settings to all WS clients."""
+    data = await get_settings()
+    await _broadcast({"type": "settings", **data})
+
+
+async def _broadcast_music_status() -> None:
+    """Broadcast current music playback state to all WS clients."""
+    data = await music_status()
+    await _broadcast({"type": "music", **data})
+
+
+async def _broadcast_volume() -> None:
+    """Broadcast current volume state to all WS clients."""
+    try:
+        data = await get_volume()
+        await _broadcast({"type": "volume", **data})
+    except Exception:
+        pass  # volume control may be unavailable
+
+
+async def _broadcast_music_queue() -> None:
+    """Broadcast current music queue to all WS clients."""
+    await _broadcast({"type": "queue", "songs": _music_queue, "index": _music_queue_index})
+
+
 async def _auto_start_queued(queue_entry: dict) -> None:
     """Auto-start a specifically queued game once it goes live."""
     async with _play_lock:
@@ -731,19 +757,6 @@ async def dashboard():
     return HTMLResponse("React frontend not built. Run 'npm run build' in src/tv_automator/web/frontend.")
 
 
-@app.get("/{filename}", include_in_schema=False)
-async def serve_root_asset(filename: str):
-    """Serve root-level public assets from the React dist directory (e.g. favicon.svg)."""
-    # os.path.basename strips any directory component, preventing path traversal
-    safe_name = os.path.basename(filename)
-    if not safe_name:
-        raise HTTPException(status_code=404)
-    file_path = _FRONTEND_DIST / safe_name
-    if file_path.is_file():
-        return FileResponse(str(file_path))
-    raise HTTPException(status_code=404)
-
-
 @app.get("/api/games")
 async def get_games(date: str | None = None):
     target = datetime.fromisoformat(date) if date else datetime.now()
@@ -775,6 +788,16 @@ async def play_game(game_id: str, date: str | None = None, feed: str = "HOME"):
 async def stop_playback():
     async with _play_lock:
         await _do_stop()
+    return {"success": True}
+
+
+@app.post("/api/video-ended")
+async def video_ended():
+    """Called by the player when a VOD (condensed game) finishes playing.
+    Clears playback state and returns to the screensaver."""
+    async with _play_lock:
+        await _do_stop()
+    log.info("Video ended — returned to screensaver")
     return {"success": True}
 
 
@@ -1455,6 +1478,7 @@ async def post_player_command(body: dict):
     """Dashboard sends a command to the player (e.g. quality change)."""
     global _player_command
     _player_command = body
+    await _broadcast({"type": "player_command", **body})
     return {"ok": True}
 
 
@@ -1511,7 +1535,9 @@ async def set_volume(level: int | None = None, mute: bool | None = None):
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
-        return await get_volume()
+        result = await get_volume()
+        await _broadcast_volume()
+        return result
     except Exception:
         log.exception("Failed to set volume")
         raise HTTPException(500, "Volume control unavailable")
@@ -1570,6 +1596,7 @@ async def get_settings():
         "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
         # Screensaver
         "screensaver_music_size": _config.get("screensaver", {}).get("music_size", "medium"),
+        "dvd_bounce": _config.get("screensaver", {}).get("dvd_bounce", False),
         # Navidrome
         "navidrome_server_url": os.getenv("NAVIDROME_URL") or _config.get("navidrome", {}).get("server_url", ""),
         "navidrome_username": os.getenv("NAVIDROME_USERNAME") or _config.get("navidrome", {}).get("username", ""),
@@ -1655,8 +1682,11 @@ async def update_settings(body: dict):
         allowed = ("small", "medium", "large")
         sz = body["screensaver_music_size"] if body["screensaver_music_size"] in allowed else "medium"
         _config.update_nested("screensaver", "music_size", value=sz)
+    if "dvd_bounce" in body:
+        _config.update_nested("screensaver", "dvd_bounce", value=bool(body["dvd_bounce"]))
     _config.save_user_config()
     log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
+    await _broadcast_settings()
     return await get_settings()
 
 
@@ -1902,10 +1932,12 @@ _music_watcher_task: asyncio.Task | None = None
 
 
 async def _music_watch_playback():
-    """Watch mpv for track end and auto-advance the queue."""
+    """Watch mpv for track end and auto-advance the queue. Also broadcasts music status."""
     global _music_queue_index
+    _tick = 0
     while True:
         await asyncio.sleep(1)
+        _tick += 1
         if not _mpv_proc or _mpv_proc.returncode is not None:
             # mpv exited — track ended
             if not _music_queue:
@@ -1916,6 +1948,7 @@ async def _music_watch_playback():
             result = await _music_advance(1)
             if result is None:
                 break  # End of queue
+            await _broadcast_music_queue()
             continue
         # Check if mpv is idle (finished playing)
         idle = await _mpv_get_property("idle-active")
@@ -1926,6 +1959,11 @@ async def _music_watch_playback():
             result = await _music_advance(1)
             if result is None:
                 break
+            await _broadcast_music_queue()
+            continue
+        # Broadcast music status every 2 seconds for position updates
+        if _tick % 2 == 0 and _ws_clients:
+            await _broadcast_music_status()
 
 
 def _music_start_watcher():
@@ -2067,6 +2105,8 @@ async def music_play(body: dict):
         _music_build_shuffle_order()
     await _music_play_current()
     _music_start_watcher()
+    await _broadcast_music_status()
+    await _broadcast_music_queue()
     return {"playing": True, "song": _music_queue[_music_queue_index]}
 
 
@@ -2075,63 +2115,67 @@ async def music_command(body: dict):
     """Send a transport command. Body: {command: pause|resume|next|prev|stop|seek, value: ...}."""
     global _music_queue_index, _music_shuffle, _music_repeat, _music_shuffle_order
     cmd = body.get("command", "")
+    result: dict = {"ok": True}
+    queue_changed = False
 
     if cmd == "pause":
         await _mpv_set_property("pause", True)
-        return {"ok": True}
     elif cmd == "resume":
         await _mpv_set_property("pause", False)
-        return {"ok": True}
     elif cmd == "toggle":
         paused = await _mpv_get_property("pause")
         await _mpv_set_property("pause", not paused)
-        return {"ok": True, "paused": not paused}
+        result["paused"] = not paused
     elif cmd == "next":
-        song = await _music_advance(1)
-        return {"ok": True, "song": song}
+        result["song"] = await _music_advance(1)
+        queue_changed = True
     elif cmd == "prev":
-        # If more than 3s in, restart; else go back
         pos = await _mpv_get_property("time-pos")
         if pos and pos > 3:
             await _mpv_command("seek", 0, "absolute")
-            return {"ok": True}
-        song = await _music_advance(-1)
-        return {"ok": True, "song": song}
+        else:
+            result["song"] = await _music_advance(-1)
+            queue_changed = True
     elif cmd == "stop":
         await _mpv_stop()
         _music_queue.clear()
         _music_queue_index = -1
-        return {"ok": True}
+        queue_changed = True
     elif cmd == "seek":
         val = body.get("value", 0)
         await _mpv_command("seek", val, "absolute")
-        return {"ok": True}
     elif cmd == "volume":
         val = max(0, min(100, float(body.get("value", 100))))
         await _mpv_set_property("volume", val)
-        return {"ok": True}
     elif cmd == "jump":
         idx = int(body.get("value", 0))
         if 0 <= idx < len(_music_queue):
             _music_queue_index = idx
             await _music_play_current()
             _music_start_watcher()
-            return {"ok": True}
-        raise HTTPException(400, "Invalid queue index")
+            queue_changed = True
+        else:
+            raise HTTPException(400, "Invalid queue index")
     elif cmd == "shuffle":
         _music_shuffle = body.get("value", not _music_shuffle)
         if _music_shuffle:
             _music_build_shuffle_order()
         else:
             _music_shuffle_order.clear()
-        return {"ok": True, "shuffle": _music_shuffle}
+        result["shuffle"] = _music_shuffle
     elif cmd == "repeat":
         modes = ["off", "all", "one"]
         idx = modes.index(_music_repeat) if _music_repeat in modes else 0
         _music_repeat = modes[(idx + 1) % 3]
-        return {"ok": True, "repeat": _music_repeat}
+        result["repeat"] = _music_repeat
     else:
         raise HTTPException(400, f"Unknown command: {cmd}")
+
+    # Broadcast changes to all clients
+    await _broadcast_music_status()
+    if queue_changed:
+        await _broadcast_music_queue()
+    return result
 
 
 @app.get("/api/music/status")
@@ -2253,6 +2297,8 @@ async def music_queue_append(body: dict):
         _music_queue_index = 0
         await _music_play_current()
         _music_start_watcher()
+    await _broadcast_music_queue()
+    await _broadcast_music_status()
     return {"ok": True, "queue_length": len(_music_queue)}
 
 
@@ -2276,6 +2322,8 @@ async def music_queue_remove(body: dict):
         else:
             _music_queue_index = -1
             await _mpv_stop()
+    await _broadcast_music_queue()
+    await _broadcast_music_status()
     return {"ok": True, "queue_length": len(_music_queue)}
 
 
@@ -2337,6 +2385,20 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_json({"type": "autoplay", "queued": True, **_autoplay_queue})
         else:
             await websocket.send_json({"type": "autoplay", "queued": False, "game_id": None})
+        # Settings
+        settings_data = await get_settings()
+        await websocket.send_json({"type": "settings", **settings_data})
+        # Music status
+        music_data = await music_status()
+        await websocket.send_json({"type": "music", **music_data})
+        # Volume
+        try:
+            vol_data = await get_volume()
+            await websocket.send_json({"type": "volume", **vol_data})
+        except Exception:
+            pass
+        # Music queue
+        await websocket.send_json({"type": "queue", "songs": _music_queue, "index": _music_queue_index})
         # Keep alive — wait for client disconnect
         while True:
             await websocket.receive_text()
@@ -2374,3 +2436,15 @@ async def static_file(filename: str):
         raise HTTPException(404)
     media = "application/javascript" if filename.endswith(".js") else "application/octet-stream"
     return FileResponse(path, media_type=media)
+
+
+@app.get("/{filename}", include_in_schema=False)
+async def serve_root_asset(filename: str):
+    """Serve root-level public assets from the React dist directory (e.g. favicon.svg)."""
+    safe_name = os.path.basename(filename)
+    if not safe_name:
+        raise HTTPException(status_code=404)
+    file_path = _FRONTEND_DIST / safe_name
+    if file_path.is_file():
+        return FileResponse(str(file_path))
+    raise HTTPException(status_code=404)

@@ -6,7 +6,7 @@ import './Settings.css';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const { refreshStatus, refreshGames } = useTvAutomator();
+  const { refreshStatus, refreshGames, settings, updateSetting } = useTvAutomator();
 
   // MLB State
   const [mlbUsername, setMlbUsername] = useState('');
@@ -17,48 +17,34 @@ const Settings: React.FC = () => {
   const [navUser, setNavUser] = useState('');
   const [navPass, setNavPass] = useState('');
   
-  // App Settings
-  const [autoStart, setAutoStart] = useState(false);
-  const [defaultFeed, setDefaultFeed] = useState('HOME');
-  const [strikeZone, setStrikeZone] = useState(true);
-  const [strikeZoneSize, setStrikeZoneSize] = useState('medium');
-  const [cecEnabled, setCecEnabled] = useState(false);
-  const [pollInterval, setPollInterval] = useState(60);
-  const [musicSize, setMusicSize] = useState('medium');
+  // Initialize form fields once when settings load
+  useEffect(() => {
+    if (settings.mlb_username) setMlbUsername(settings.mlb_username);
+    if (settings.navidrome_server_url) setNavUrl(settings.navidrome_server_url);
+    if (settings.navidrome_username) setNavUser(settings.navidrome_username);
+  }, [settings.mlb_username, settings.navidrome_server_url, settings.navidrome_username]);
+
+  // Derived App Settings
+  const autoStart = !!settings.auto_start;
+  const defaultFeed = settings.default_feed || 'HOME';
+  const strikeZone = !!settings.strike_zone_enabled;
+  const strikeZoneSize = settings.strike_zone_size || 'medium';
+  const cecEnabled = !!settings.cec_enabled;
+  const pollInterval = settings.poll_interval || 60;
+  const musicSize = settings.screensaver_music_size || 'medium';
+  const dvdBounce = !!settings.dvd_bounce;
+  const mlbAuthenticated = settings.mlb_authenticated ?? null;
 
   // YouTube Channels
-  const [channels, setChannels] = useState<{id: string, name: string}[]>([]);
+  const sc = settings.suggested_channels || {};
+  const channels = Object.entries(sc).map(([id, name]) => ({ id, name: name as string }));
+
   const [newChannelId, setNewChannelId] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
   const [showChannelHelp, setShowChannelHelp] = useState(false);
 
   // Loading / Messages
   const [toast, setToast] = useState<{msg: string, isError: boolean} | null>(null);
-  const [mlbAuthenticated, setMlbAuthenticated] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(data => {
-        setMlbUsername(data.mlb_username || '');
-        setMlbAuthenticated(!!data.mlb_authenticated);
-        setAutoStart(!!data.auto_start);
-        setDefaultFeed(data.default_feed || 'HOME');
-        setStrikeZone(!!data.strike_zone_enabled);
-        setStrikeZoneSize(data.strike_zone_size || 'medium');
-        setCecEnabled(!!data.cec_enabled);
-        setPollInterval(data.poll_interval || 60);
-        setMusicSize(data.screensaver_music_size || 'medium');
-        
-        setNavUrl(data.navidrome_server_url || '');
-        setNavUser(data.navidrome_username || '');
-
-        // YouTube suggested channels {channel_id: display_name}
-        const sc = data.suggested_channels || {};
-        setChannels(Object.entries(sc).map(([id, name]) => ({ id, name: name as string })));
-      })
-      .catch(err => console.error("Failed to load settings:", err));
-  }, []);
 
   const showToast = (msg: string, isError = false) => {
     setToast({ msg, isError });
@@ -77,17 +63,12 @@ const Settings: React.FC = () => {
       const data = await r.json();
       if (data.success) {
         showToast("MLB Credentials Saved & Verified!");
-        setMlbAuthenticated(true);
         setMlbPassword(''); // Clear password field for security layout
-        // Immediately pull fresh status + games so the TopBar "Auth OK" and
-        // Dashboard games populate without waiting on the WebSocket.
         await refreshStatus();
-        // Give the backend scheduler a moment to finish refreshing, then pull games.
         setTimeout(() => { refreshGames(); }, 500);
         setTimeout(() => navigate('/'), 1000); // Navigate to Dashboard after toast
       } else {
         showToast(data.error || "MLB Auth Failed", true);
-        setMlbAuthenticated(false);
         await refreshStatus();
       }
     } catch (err) {
@@ -116,19 +97,6 @@ const Settings: React.FC = () => {
     }
   };
 
-  const updateSetting = async (payload: any) => {
-    try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      showToast("Setting updated");
-    } catch (err) {
-      showToast("Failed to save setting", true);
-    }
-  };
-
   return (
     <div className="view-container animate-in" style={{ paddingBottom: '60px' }}>
       <div className="page-header">
@@ -141,8 +109,8 @@ const Settings: React.FC = () => {
       {toast && (
         <div style={{
           position: 'fixed', top: 20, right: 30, zIndex: 100,
-          background: toast.isError ? 'rgba(255, 42, 95, 0.9)' : 'rgba(0, 255, 170, 0.9)',
-          color: toast.isError ? '#fff' : '#030308',
+          background: toast.isError ? 'var(--red)' : 'var(--green)',
+          color: toast.isError ? '#fff' : '#000',
           padding: '12px 24px', borderRadius: '8px', fontWeight: 600,
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
           animation: 'fade-in-up 0.2s ease-out'
@@ -154,9 +122,9 @@ const Settings: React.FC = () => {
       <div className="settings-grid">
         
         {/* MLB ACCOUNT */}
-        <div className="settings-card glass-panel">
+        <div className="settings-card">
           <div className="settings-card-header">
-            <PlaySquare size={20} color="var(--neon-cyan)" />
+            <PlaySquare size={20} color="var(--accent)" />
             <h2 className="settings-card-title">MLB.TV Credentials</h2>
             {mlbAuthenticated !== null && (
               <span style={{
@@ -165,9 +133,9 @@ const Settings: React.FC = () => {
                 fontWeight: 700,
                 padding: '2px 8px',
                 borderRadius: '4px',
-                background: mlbAuthenticated ? 'rgba(0,255,170,0.15)' : 'rgba(255,42,95,0.15)',
-                color: mlbAuthenticated ? 'var(--neon-cyan)' : '#ff2a5f',
-                border: `1px solid ${mlbAuthenticated ? 'var(--neon-cyan)' : '#ff2a5f'}`,
+                background: mlbAuthenticated ? 'var(--green-dim)' : 'var(--red-dim)',
+                color: mlbAuthenticated ? 'var(--accent)' : 'var(--red)',
+                border: `1px solid ${mlbAuthenticated ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
               }}>
                 {mlbAuthenticated ? 'AUTHENTICATED' : 'NOT AUTHENTICATED'}
               </span>
@@ -199,9 +167,9 @@ const Settings: React.FC = () => {
         </div>
 
         {/* NAVIDROME */}
-        <div className="settings-card glass-panel">
+        <div className="settings-card">
           <div className="settings-card-header">
-            <Music size={20} color="var(--neon-cyan)" />
+            <Music size={20} color="var(--accent)" />
             <h2 className="settings-card-title">Navidrome (Screensaver Music)</h2>
           </div>
           <form className="settings-field" onSubmit={handleNavSave}>
@@ -238,9 +206,9 @@ const Settings: React.FC = () => {
         </div>
 
         {/* PLAYBACK & OVERLAYS */}
-        <div className="settings-card glass-panel">
+        <div className="settings-card">
           <div className="settings-card-header">
-            <MonitorPlay size={20} color="var(--neon-cyan)" />
+            <MonitorPlay size={20} color="var(--accent)" />
             <h2 className="settings-card-title">Playback & Overlay</h2>
           </div>
           
@@ -251,7 +219,6 @@ const Settings: React.FC = () => {
             </div>
             <label className="switch">
               <input type="checkbox" checked={autoStart} onChange={e => {
-                setAutoStart(e.target.checked);
                 updateSetting({ auto_start: e.target.checked });
               }} />
               <span className="slider"></span>
@@ -261,7 +228,6 @@ const Settings: React.FC = () => {
           <div className="settings-field-row">
             <div className="settings-label">Default Broadcast Feed</div>
             <select className="settings-input settings-select" style={{width: 'auto', minWidth: '120px'}} value={defaultFeed} onChange={e => {
-              setDefaultFeed(e.target.value);
               updateSetting({ default_feed: e.target.value });
             }}>
               <option value="HOME">Home</option>
@@ -278,7 +244,6 @@ const Settings: React.FC = () => {
             </div>
             <label className="switch">
               <input type="checkbox" checked={strikeZone} onChange={e => {
-                setStrikeZone(e.target.checked);
                 updateSetting({ strike_zone_enabled: e.target.checked });
               }} />
               <span className="slider"></span>
@@ -288,7 +253,6 @@ const Settings: React.FC = () => {
           <div className="settings-field-row">
             <div className="settings-label">Strike Zone Size</div>
             <select className="settings-input settings-select" style={{width: 'auto'}} value={strikeZoneSize} onChange={e => {
-              setStrikeZoneSize(e.target.value);
               updateSetting({ strike_zone_size: e.target.value });
             }}>
               <option value="small">Small</option>
@@ -299,9 +263,9 @@ const Settings: React.FC = () => {
         </div>
 
         {/* SYSTEM */}
-        <div className="settings-card glass-panel">
+        <div className="settings-card">
           <div className="settings-card-header">
-            <SettingsIcon size={20} color="var(--neon-cyan)" />
+            <SettingsIcon size={20} color="var(--accent)" />
             <h2 className="settings-card-title">System & Hardware</h2>
           </div>
           
@@ -312,7 +276,6 @@ const Settings: React.FC = () => {
             </div>
             <label className="switch">
               <input type="checkbox" checked={cecEnabled} onChange={e => {
-                setCecEnabled(e.target.checked);
                 updateSetting({ cec_enabled: e.target.checked });
               }} />
               <span className="slider"></span>
@@ -327,8 +290,7 @@ const Settings: React.FC = () => {
                 type="number" 
                 min="15" max="300" 
                 value={pollInterval} 
-                onChange={e => setPollInterval(parseInt(e.target.value) || 60)} 
-                onBlur={e => updateSetting({ poll_interval: parseInt(e.target.value) || 60 })}
+                onChange={e => updateSetting({ poll_interval: parseInt(e.target.value) || 60 })} 
                 style={{width: '80px', textAlign: 'center'}}
               />
               <span style={{fontSize:'0.8rem', color:'var(--text-tertiary)'}}>sec</span>
@@ -338,7 +300,6 @@ const Settings: React.FC = () => {
           <div className="settings-field-row">
             <div className="settings-label">Screensaver Music UI</div>
             <select className="settings-input settings-select" style={{width: 'auto'}} value={musicSize} onChange={e => {
-              setMusicSize(e.target.value);
               updateSetting({ screensaver_music_size: e.target.value });
             }}>
               <option value="small">Small</option>
@@ -346,12 +307,25 @@ const Settings: React.FC = () => {
               <option value="large">Large</option>
             </select>
           </div>
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">DVD Bounce</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Bounce screensaver content around edges like a DVD logo</div>
+            </div>
+            <label className="switch">
+              <input type="checkbox" checked={dvdBounce} onChange={e => {
+                updateSetting({ dvd_bounce: e.target.checked });
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
         </div>
 
         {/* YOUTUBE CHANNELS */}
-        <div className="settings-card glass-panel" style={{gridColumn: '1 / -1'}}>
+        <div className="settings-card" style={{gridColumn: '1 / -1'}}>
           <div className="settings-card-header">
-            <Video size={20} color="var(--neon-red)" />
+            <Video size={20} color="var(--red)" />
             <h2 className="settings-card-title">YouTube Suggested Channels</h2>
           </div>
 
@@ -369,15 +343,15 @@ const Settings: React.FC = () => {
 
           {showChannelHelp && (
             <div style={{
-              background: 'rgba(0, 229, 255, 0.05)',
-              border: '1px solid rgba(0, 229, 255, 0.2)',
+              background: 'var(--accent-dim)',
+              border: '1px solid var(--accent-border)',
               borderRadius: '12px',
               padding: '16px',
               fontSize: '0.82rem',
               color: 'var(--text-secondary)',
               lineHeight: 1.6,
             }}>
-              <strong style={{color: 'var(--neon-cyan)'}}>Finding a YouTube Channel ID:</strong>
+              <strong style={{color: 'var(--accent)'}}>Finding a YouTube Channel ID:</strong>
               <ol style={{margin: '8px 0 0 18px', display: 'flex', flexDirection: 'column', gap: '6px'}}>
                 <li>Go to the YouTube channel page</li>
                 <li>Click <strong>About</strong> → <strong>Share Channel</strong> → <strong>Copy Channel ID</strong></li>
@@ -405,7 +379,6 @@ const Settings: React.FC = () => {
                   title="Remove channel"
                   onClick={() => {
                     const updated = channels.filter((_, idx) => idx !== i);
-                    setChannels(updated);
                     const obj: Record<string,string> = {};
                     updated.forEach(c => { obj[c.id] = c.name; });
                     updateSetting({ suggested_channels: obj });
@@ -442,11 +415,10 @@ const Settings: React.FC = () => {
               style={{flex: '1 1 150px'}}
             />
             <button
-              className="btn btn-neon"
+              className="btn btn-accent"
               disabled={!newChannelId.trim() || !newChannelName.trim()}
               onClick={() => {
                 const updated = [...channels, { id: newChannelId.trim(), name: newChannelName.trim() }];
-                setChannels(updated);
                 const obj: Record<string,string> = {};
                 updated.forEach(c => { obj[c.id] = c.name; });
                 updateSetting({ suggested_channels: obj });

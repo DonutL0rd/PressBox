@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>TV Automator</title>
+<title>PressBox</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -277,194 +277,64 @@
     return 'Starts in ' + m + 'm';
   }
 
-  async function loadData() {
-    try {
-      const [fRes, gRes, apRes, stRes] = await Promise.all([
-        fetch('/api/favorites'),
-        fetch('/api/games'),
-        fetch('/api/autoplay'),
-        fetch('/api/settings'),
-      ]);
+  function connectWs() {
+    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+    
+    ws.onmessage = function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (data.type === 'games') {
+          if (Array.isArray(data.games)) renderUpcoming(data.games);
+        } else if (data.type === 'music') {
+          currentMusic = data;
+          renderMusic(data);
+        } else if (data.type === 'autoplay') {
+          currentAutoplay = data;
+          renderAutoplay(currentAutoplay, currentSettings);
+        } else if (data.type === 'settings') {
+          currentSettings = data;
+          if (data.screensaver_music_size) {
+            npmSize = data.screensaver_music_size;
+            if (currentMusic) renderMusic(currentMusic);
+          }
+          var wanted = !!data.dvd_bounce;
+          if (wanted !== dvdBounce) {
+            dvdBounce = wanted;
+            if (dvdBounce) enableDvdBounce();
+            else disableDvdBounce();
+          }
+          renderAutoplay(currentAutoplay, currentSettings);
+        }
+      } catch (err) {}
+    };
+    
+    ws.onclose = function() {
+      setTimeout(connectWs, 3000);
+    };
+  }
 
+  let currentSettings = null;
+  let currentMusic = null;
+  let currentAutoplay = null;
+
+  async function init() {
+    try {
+      var fRes = await fetch('/api/favorites');
       if (fRes.ok) {
-        const fData = await fRes.json();
+        var fData = await fRes.json();
         favorites = new Set(fData.teams || []);
       }
-
-      // Render game section
-      if (gRes.ok) {
-        const games = await gRes.json();
-        renderUpcoming(games);
-      }
-
-      // Read screensaver music size setting
-      const settings = stRes.ok ? await stRes.json() : null;
-      if (settings && settings.screensaver_music_size) {
-        npmSize = settings.screensaver_music_size;
-      }
-
-      // Render auto-play section
-      const autoplay = apRes.ok ? await apRes.json() : null;
-      renderAutoplay(autoplay, settings);
-
-    } catch(e) {
-      console.error('Failed to load data:', e);
-    }
+    } catch(e) {}
+    connectWs();
   }
-
-  function renderUpcoming(games) {
-    const now = Date.now();
-    const upcoming = games.filter(function(g) {
-      return g.status === 'scheduled' || g.status === 'pre_game';
-    });
-
-    let next = null;
-    for (const g of upcoming) {
-      if (favorites.has(g.away_team.abbreviation) || favorites.has(g.home_team.abbreviation)) {
-        next = g; break;
-      }
-    }
-    if (!next && upcoming.length) next = upcoming[0];
-
-    const live = games.filter(function(g) { return g.status === 'live'; });
-    let liveNext = null;
-    for (const g of live) {
-      if (favorites.has(g.away_team.abbreviation) || favorites.has(g.home_team.abbreviation)) {
-        liveNext = g; break;
-      }
-    }
-    if (!liveNext && live.length) liveNext = live[0];
-
-    const el = document.getElementById('upcoming');
-    if (liveNext) {
-      const isFavAway = favorites.has(liveNext.away_team.abbreviation);
-      const isFavHome = favorites.has(liveNext.home_team.abbreviation);
-      el.innerHTML = '<div class="upcoming-label live-label">Live Now</div>'
-        + '<div class="next-game live-game">'
-        + '<div class="next-matchup">'
-        + '<span class="next-team' + (isFavAway ? ' favorite' : '') + '">' + liveNext.away_team.abbreviation + '</span>'
-        + '<span class="next-at">' + (liveNext.display_score || '@') + '</span>'
-        + '<span class="next-team' + (isFavHome ? ' favorite' : '') + '">' + liveNext.home_team.abbreviation + '</span>'
-        + '</div>'
-        + '<div class="next-time">' + liveNext.status_label + '</div>'
-        + '</div>';
-    } else if (next) {
-      const start = new Date(next.start_time).getTime();
-      const diff = start - now;
-      const isFavAway = favorites.has(next.away_team.abbreviation);
-      const isFavHome = favorites.has(next.home_team.abbreviation);
-      el.innerHTML = '<div class="upcoming-label">Next Game</div>'
-        + '<div class="next-game">'
-        + '<div class="next-matchup">'
-        + '<span class="next-team' + (isFavAway ? ' favorite' : '') + '">' + next.away_team.abbreviation + '</span>'
-        + '<span class="next-at">@</span>'
-        + '<span class="next-team' + (isFavHome ? ' favorite' : '') + '">' + next.home_team.abbreviation + '</span>'
-        + '</div>'
-        + '<div class="next-time">' + next.display_time + '</div>'
-        + '<div class="next-countdown">' + formatCountdown(diff) + '</div>'
-        + '</div>';
-    } else {
-      el.innerHTML = '<div class="no-games">No upcoming games today</div>';
-    }
-  }
-
-  function escHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function fmtTime(s) {
-    s = Math.floor(s || 0);
-    var m = Math.floor(s / 60), sec = s % 60;
-    return m + ':' + (sec < 10 ? '0' : '') + sec;
-  }
-
-  function renderMusic(music) {
-    var el = document.getElementById('music-block');
-    var container = document.getElementById('container');
-    if (!music || !music.playing) {
-      el.innerHTML = '';
-      el.className = '';
-      container.classList.remove('has-music');
-      return;
-    }
-    el.className = 'npm-' + npmSize;
-    container.classList.add('has-music');
-    var artSize = npmSize === 'large' ? 400 : npmSize === 'medium' ? 220 : 150;
-    var pct = music.duration > 0 ? Math.min(100, (music.position / music.duration) * 100) : 0;
-    var artSrc = music.song && music.song.albumId
-      ? '/api/music/cover/' + encodeURIComponent(music.song.albumId) + '?size=' + artSize
-      : '';
-    el.innerHTML = '<div class="now-playing-music">'
-      + (artSrc ? '<img class="npm-art" src="' + artSrc + '" alt="">' : '<div class="npm-art"></div>')
-      + '<div class="npm-info">'
-      + '<div class="npm-label">Now Playing</div>'
-      + '<div class="npm-title">' + escHtml((music.song && music.song.title) || '') + '</div>'
-      + '<div class="npm-artist">' + escHtml((music.song && music.song.artist) || '') + '</div>'
-      + '<div class="npm-progress">'
-      + '<span class="npm-time">' + fmtTime(music.position) + '</span>'
-      + '<div class="npm-bar-bg"><div class="npm-bar-fill" style="width:' + pct.toFixed(1) + '%"></div></div>'
-      + '<span class="npm-time">' + fmtTime(music.duration) + '</span>'
-      + '</div>'
-      + '</div>'
-      + '</div>';
-  }
-
-  async function loadMusicStatus() {
-    try {
-      var r = await fetch('/api/music/status');
-      renderMusic(r.ok ? await r.json() : null);
-    } catch(e) {
-      renderMusic(null);
-    }
-  }
-
-  function renderAutoplay(autoplay, settings) {
-    const el = document.getElementById('autoplay-block');
-    if (autoplay && autoplay.queued && autoplay.game_id) {
-      el.innerHTML = '<div class="autoplay-status">'
-        + '<span class="autoplay-dot"></span>'
-        + '<span class="autoplay-text">Auto-play queued:</span>'
-        + '<span class="autoplay-game">' + (autoplay.display_matchup || autoplay.game_id) + '</span>'
-        + '<span class="autoplay-feed">' + (autoplay.feed || 'HOME') + '</span>'
-        + '</div>';
-    } else if (settings && settings.auto_start) {
-      el.innerHTML = '<div class="autoplay-status">'
-        + '<span class="autoplay-dot"></span>'
-        + '<span class="autoplay-text">Auto-start enabled — will play when favorites go live</span>'
-        + '</div>';
-    } else {
-      el.innerHTML = '<div class="autoplay-off">Auto-play off</div>';
-    }
-  }
-
-  // ── Burn-in protection ────────────────────────────────────────
-
-  // Random pixel shift — moves content to a new random position every 45s.
-  const MAX_SHIFT = 60;
-  function randomShift() {
-    const x = Math.round((Math.random() * 2 - 1) * MAX_SHIFT);
-    const y = Math.round((Math.random() * 2 - 1) * MAX_SHIFT);
-    document.getElementById('container').style.transform = 'translate(' + x + 'px, ' + y + 'px)';
-  }
-  setTimeout(randomShift, 1400);
-  setInterval(randomShift, 45000);
-
-  // Deep dim — every 20 minutes fade to near-black for 8 seconds, then restore.
-  const overlay = document.getElementById('dim-overlay');
-  function deepDim() {
-    overlay.classList.add('dimming');
-    setTimeout(function() {
-      overlay.classList.remove('dimming');
-    }, 8000);
-  }
-  setInterval(deepDim, 20 * 60 * 1000);
 
   updateClock();
   setInterval(updateClock, 1000);
-  loadData();
-  setInterval(loadData, 60000);
-  loadMusicStatus();
-  setInterval(loadMusicStatus, 3000);
+  init();
+
+  // Start with random shift
+  startRandomShift();
 })();
 </script>
 </body>

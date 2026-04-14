@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Tv, Video, Settings, Play, Music, Radio, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Tv, Video, Settings, Music, Radio, PanelLeftClose, PanelLeftOpen, Box } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 
 const Sidebar: React.FC = () => {
@@ -11,19 +11,19 @@ const Sidebar: React.FC = () => {
     <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="sidebar-brand">
         <div className="brand-icon-wrapper">
-          <Play className="brand-icon" size={20} fill="currentColor" />
+          <Box className="brand-icon" size={18} />
         </div>
         {!collapsed && (
           <div className="brand-text-block">
-            <span className="brand-title tracking-tight">TV Automator</span>
-            <span className="brand-subtitle">Controller View</span>
+            <span className="brand-title">PressBox</span>
+            <span className="brand-subtitle">Media Server</span>
           </div>
         )}
       </div>
 
       <nav className="nav-menu">
-        <NavLink 
-          to="/" 
+        <NavLink
+          to="/"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           title="Now Playing"
         >
@@ -31,17 +31,17 @@ const Sidebar: React.FC = () => {
           {!collapsed && <span>Now Playing</span>}
         </NavLink>
 
-        <NavLink 
-          to="/mlb" 
+        <NavLink
+          to="/mlb"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           title="MLB"
         >
           <Tv className="nav-icon" size={18} />
           {!collapsed && <span>MLB</span>}
         </NavLink>
-        
-        <NavLink 
-          to="/youtube" 
+
+        <NavLink
+          to="/youtube"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           title="YouTube"
         >
@@ -59,7 +59,7 @@ const Sidebar: React.FC = () => {
         </NavLink>
 
         <NavLink
-          to="/settings" 
+          to="/settings"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
           title="Settings"
         >
@@ -72,7 +72,7 @@ const Sidebar: React.FC = () => {
         {!collapsed && (
           <div className="status-indicator">
             <div className={`status-dot ${connected ? 'connected' : 'error'}`} />
-            {connected ? 'WS Connected' : 'Connecting...'}
+            {connected ? 'Connected' : 'Connecting…'}
           </div>
         )}
         {collapsed && (
@@ -87,7 +87,7 @@ const Sidebar: React.FC = () => {
         onClick={() => setCollapsed(!collapsed)}
         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
-        {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
       </button>
     </aside>
   );

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>TV Automator Player</title>
+<title>PressBox Player</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
@@ -237,8 +237,13 @@
       }
     } catch(e) {}
 
-    // Load overlay settings
-    if (!isCondensed) await applySettings();
+    // Load initial overlay settings
+    if (!isCondensed) {
+       try {
+         var res = await fetch('/api/settings');
+         if (res.ok) handleSettings(await res.json());
+       } catch(e) {}
+    }
 
     if (isCondensed || !szEnabled) {
       document.getElementById('sz-overlay').classList.add('hidden');
@@ -249,16 +254,12 @@
       szPollTimer = setInterval(pollPitches, 6000);
       setTimeout(pollPitches, 2000);
     }
-
-    // Re-check settings periodically so dashboard changes apply live
-    if (!isCondensed) setInterval(applySettings, 10000);
+    
+    connectWs();
   })();
 
-  async function applySettings() {
-    try {
-      var res = await fetch('/api/settings');
-      if (!res.ok) return;
-      var data = await res.json();
+  function handleSettings(data) {
+      if (!data) return;
       batterIntelEnabled = data.batter_intel_enabled !== false;
       breakOverlayEnabled = data.between_innings_enabled !== false;
       overlayDelayMs = ((data.overlay_delay != null ? data.overlay_delay : 2) * 1000) | 0;
@@ -270,7 +271,7 @@
       szEnabled = data.strike_zone_enabled !== false;
       if (szEnabled && !wasEnabled) {
         document.getElementById('sz-overlay').classList.remove('hidden');
-        if (!szPollTimer) {
+        if (!szPollTimer && !isCondensed) {
           szPollTimer = setInterval(pollPitches, 6000);
           pollPitches();
         }
@@ -278,8 +279,35 @@
         document.getElementById('sz-overlay').classList.add('hidden');
         if (szPollTimer) { clearInterval(szPollTimer); szPollTimer = null; }
       }
-    } catch(e) {}
   }
+
+  function connectWs() {
+    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+    
+    ws.onmessage = function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        if (data.type === 'settings' && !isCondensed) {
+          handleSettings(data);
+        } else if (data.type === 'player_command') {
+          if (data.action === 'quality' && hls) {
+            var lvl = parseInt(data.level);
+            hls.currentLevel = isNaN(lvl) ? -1 : lvl;
+          }
+        }
+      } catch (err) {}
+    };
+    ws.onclose = function() {
+      setTimeout(connectWs, 3000);
+    };
+  }
+
+  // ── Auto-return to screensaver when VOD ends ───────
+  video.addEventListener('ended', function() {
+    if (!isCondensed) return; // only for condensed/recap playback
+    fetch('/api/video-ended', { method: 'POST' }).catch(function() {});
+  });
 
   // ── HLS player ─────────────────────────────────────
   async function loadStream() {
@@ -354,16 +382,6 @@
   }
 
   loadStream();
-
-  // ── Player command polling ─────────────────────────
-  setInterval(function() {
-    fetch('/api/player/command').then(function(r) { return r.json(); }).then(function(cmd) {
-      if (cmd.action === 'quality' && hls) {
-        var lvl = parseInt(cmd.level);
-        hls.currentLevel = isNaN(lvl) ? -1 : lvl;
-      }
-    }).catch(function(){});
-  }, 3000);
 
   // ── Strike zone + batter intel + break overlay ─────
   var szOverlay = document.getElementById('sz-overlay');

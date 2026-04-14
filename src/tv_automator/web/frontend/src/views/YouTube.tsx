@@ -233,7 +233,7 @@ const YouTube: React.FC = () => {
       {/* ── URL Input Bar ──────────────────────────────────────── */}
       <form className="yt-url-bar" onSubmit={handleCast}>
         <div className="yt-url-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--neon-red)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--red)">
             <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
           </svg>
         </div>
@@ -265,7 +265,7 @@ const YouTube: React.FC = () => {
           <section className="yt-section">
             <div className="yt-section-head">
               <h2 className="yt-section-title">
-                <Play size={18} color="var(--neon-red)" /> Continue Watching
+                <Play size={18} color="var(--red)" /> Continue Watching
               </h2>
               <span className="yt-section-count">{continueWatching.length}</span>
             </div>
@@ -333,7 +333,7 @@ const YouTube: React.FC = () => {
           <section className="yt-section">
             <div className="yt-section-head">
               <h2 className="yt-section-title">
-                <Radio size={18} color="var(--neon-cyan)" /> Suggested Channels
+                <Radio size={18} color="var(--accent)" /> Suggested Channels
               </h2>
             </div>
 
@@ -369,7 +369,7 @@ const YouTube: React.FC = () => {
         {loadingSuggested && channelNames.length === 0 && (
           <section className="yt-section">
             <h2 className="yt-section-title">
-              <Radio size={18} color="var(--neon-cyan)" /> Loading Suggestions…
+              <Radio size={18} color="var(--accent)" /> Loading Suggestions…
             </h2>
             <SkeletonCards count={6} />
           </section>
@@ -379,7 +379,7 @@ const YouTube: React.FC = () => {
         {!loadingHistory && !loadingSuggested && history.length === 0 && channelNames.length === 0 && (
           <div className="yt-empty">
             <div className="yt-empty-icon">
-              <Video size={28} color="var(--neon-red)" />
+              <Video size={28} color="var(--red)" />
             </div>
             <p>No watch history yet. Paste a YouTube URL above to cast your first video to the TV.</p>
           </div>

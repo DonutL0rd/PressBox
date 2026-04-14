@@ -121,7 +121,7 @@ const GameDetailPanel: React.FC<{
   const inningNums = Array.from({ length: maxInnings }, (_, i) => i + 1);
 
   return (
-    <div className="detail-panel glass-panel animate-in" key={game.game_id}>
+    <div className="detail-panel animate-in" key={game.game_id}>
       {/* Header */}
       <div className="detail-head">
         <div className="detail-head-teams">
@@ -152,7 +152,7 @@ const GameDetailPanel: React.FC<{
         {game.is_watchable && (
           <div className="detail-play-row">
             <button
-              className="btn btn-neon"
+              className="btn btn-accent"
               onClick={() => onPlay(game.game_id, 'HOME')}
               disabled={isPlaying}
             >
@@ -160,6 +160,19 @@ const GameDetailPanel: React.FC<{
             </button>
             <button className="btn" onClick={() => onPlay(game.game_id, 'AWAY')} disabled={isPlaying}>
               Away Feed
+            </button>
+          </div>
+        )}
+
+        {/* Watch Recap — available for final games */}
+        {game.status === 'final' && (
+          <div className="detail-play-row">
+            <button
+              className="btn btn-accent"
+              onClick={() => onPlay(game.game_id, 'CONDENSED')}
+              disabled={isPlaying}
+            >
+              <Play size={14} /> Watch Recap
             </button>
           </div>
         )}
