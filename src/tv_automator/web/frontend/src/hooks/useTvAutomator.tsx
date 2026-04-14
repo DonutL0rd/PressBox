@@ -85,6 +85,8 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let pollTimer: ReturnType<typeof setInterval>;
+    let wsFailCount = 0;
+    const MAX_RECONNECT_DELAY = 30000;
 
     // Belt-and-braces: REST-fetch on mount as a source of truth
     // independent of the WebSocket.
@@ -97,6 +99,10 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        if (wsFailCount > 0) {
+          console.log('[TvAutomator] WebSocket reconnected');
+        }
+        wsFailCount = 0;
         setConnected(true);
       };
 
@@ -107,7 +113,9 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
             console.log('[TvAutomator] WS status →', data);
             setStatus(prev => ({ ...prev, ...data }));
           } else if (data.type === 'games') {
-            setGames(data.games);
+            if (Array.isArray(data.games)) {
+              setGames(data.games);
+            }
           }
         } catch (e) {
           console.error('Failed to parse WS message', e);
@@ -116,11 +124,15 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
 
       ws.onclose = () => {
         setConnected(false);
-        reconnectTimer = setTimeout(connect, 3000);
+        const delay = Math.min(3000 * Math.pow(1.5, wsFailCount), MAX_RECONNECT_DELAY);
+        reconnectTimer = setTimeout(connect, delay);
       };
 
-      ws.onerror = (err) => {
-        console.error('WebSocket Error', err);
+      ws.onerror = () => {
+        wsFailCount++;
+        if (wsFailCount === 1) {
+          console.warn('[TvAutomator] WebSocket connection failed — falling back to REST polling');
+        }
         ws.close();
       };
     };

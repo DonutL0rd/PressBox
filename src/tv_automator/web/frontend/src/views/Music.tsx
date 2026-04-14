@@ -55,13 +55,13 @@ const Music: React.FC = () => {
       extract = (d: any) => (d.index || []).flatMap((idx: any) => idx.artist || []);
     } else if (activeTab === 'Radio') {
       endpoint = '/api/music/radio';
-      extract = (d: any) => d || [];
+      extract = (d: any) => d.internetRadioStation || d.station || (Array.isArray(d) ? d : []);
     }
 
     if (endpoint) {
       fetch(endpoint)
         .then(r => r.json())
-        .then(data => setItems(extract(data)))
+        .then(data => { const result = extract(data); setItems(Array.isArray(result) ? result : []); })
         .catch(console.error);
     }
   }, [activeTab]);
@@ -71,7 +71,7 @@ const Music: React.FC = () => {
     if (selectedArtist && activeTab === 'Artists') {
       fetch(`/api/music/artist/${selectedArtist.id}`)
         .then(r => r.json())
-        .then(data => setItems(data.album || []));
+        .then(data => { const albums = data.album || []; setItems(Array.isArray(albums) ? albums : []); });
     }
   }, [selectedArtist]);
 

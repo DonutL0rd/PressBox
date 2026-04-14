@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save } from 'lucide-react';
+import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save, Video, Trash2, Plus, HelpCircle } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 import './Settings.css';
 
@@ -26,6 +26,12 @@ const Settings: React.FC = () => {
   const [pollInterval, setPollInterval] = useState(60);
   const [musicSize, setMusicSize] = useState('medium');
 
+  // YouTube Channels
+  const [channels, setChannels] = useState<{id: string, name: string}[]>([]);
+  const [newChannelId, setNewChannelId] = useState('');
+  const [newChannelName, setNewChannelName] = useState('');
+  const [showChannelHelp, setShowChannelHelp] = useState(false);
+
   // Loading / Messages
   const [toast, setToast] = useState<{msg: string, isError: boolean} | null>(null);
   const [mlbAuthenticated, setMlbAuthenticated] = useState<boolean | null>(null);
@@ -46,6 +52,10 @@ const Settings: React.FC = () => {
         
         setNavUrl(data.navidrome_server_url || '');
         setNavUser(data.navidrome_username || '');
+
+        // YouTube suggested channels {channel_id: display_name}
+        const sc = data.suggested_channels || {};
+        setChannels(Object.entries(sc).map(([id, name]) => ({ id, name: name as string })));
       })
       .catch(err => console.error("Failed to load settings:", err));
   }, []);
@@ -335,6 +345,117 @@ const Settings: React.FC = () => {
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
+          </div>
+        </div>
+
+        {/* YOUTUBE CHANNELS */}
+        <div className="settings-card glass-panel" style={{gridColumn: '1 / -1'}}>
+          <div className="settings-card-header">
+            <Video size={20} color="var(--neon-red)" />
+            <h2 className="settings-card-title">YouTube Suggested Channels</h2>
+          </div>
+
+          <div style={{fontSize: '0.8rem', color: 'var(--text-tertiary)', lineHeight: 1.5}}>
+            Videos from these channels appear on the YouTube page. Add channels by their Channel ID.
+            <button
+              className="btn"
+              style={{marginLeft: '8px', padding: '2px 10px', fontSize: '0.75rem'}}
+              onClick={() => setShowChannelHelp(!showChannelHelp)}
+              type="button"
+            >
+              <HelpCircle size={12} /> How to find Channel ID
+            </button>
+          </div>
+
+          {showChannelHelp && (
+            <div style={{
+              background: 'rgba(0, 229, 255, 0.05)',
+              border: '1px solid rgba(0, 229, 255, 0.2)',
+              borderRadius: '12px',
+              padding: '16px',
+              fontSize: '0.82rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+            }}>
+              <strong style={{color: 'var(--neon-cyan)'}}>Finding a YouTube Channel ID:</strong>
+              <ol style={{margin: '8px 0 0 18px', display: 'flex', flexDirection: 'column', gap: '6px'}}>
+                <li>Go to the YouTube channel page</li>
+                <li>Click <strong>About</strong> → <strong>Share Channel</strong> → <strong>Copy Channel ID</strong></li>
+                <li>Or: View the page source and search for <code style={{background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: '3px', fontFamily: 'var(--font-mono)', fontSize: '0.78rem'}}>channel_id</code></li>
+                <li>Or: Use a site like <strong>commentpicker.com/youtube-channel-id.php</strong> — paste the channel URL</li>
+                <li>The ID looks like: <code style={{background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: '3px', fontFamily: 'var(--font-mono)', fontSize: '0.78rem'}}>UCsBjURrPoezykLs9EqgamOA</code></li>
+              </ol>
+            </div>
+          )}
+
+          {/* Current channels list */}
+          <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+            {channels.map((ch, i) => (
+              <div key={ch.id} style={{
+                display: 'flex', alignItems: 'center', gap: '12px',
+                background: 'rgba(255,255,255,0.02)', borderRadius: '10px', padding: '10px 14px',
+                border: '1px solid var(--border-subtle)',
+              }}>
+                <div style={{flex: 1, minWidth: 0}}>
+                  <div style={{fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)'}}>{ch.name}</div>
+                  <div style={{fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{ch.id}</div>
+                </div>
+                <button
+                  className="btn-icon"
+                  title="Remove channel"
+                  onClick={() => {
+                    const updated = channels.filter((_, idx) => idx !== i);
+                    setChannels(updated);
+                    const obj: Record<string,string> = {};
+                    updated.forEach(c => { obj[c.id] = c.name; });
+                    updateSetting({ suggested_channels: obj });
+                  }}
+                  style={{color: 'var(--text-tertiary)', padding: '6px'}}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            {channels.length === 0 && (
+              <div style={{textAlign: 'center', padding: '16px', color: 'var(--text-tertiary)', fontSize: '0.85rem'}}>
+                No channels configured
+              </div>
+            )}
+          </div>
+
+          {/* Add new channel */}
+          <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="Channel ID (e.g. UCsBjURrPoezykLs9EqgamOA)"
+              value={newChannelId}
+              onChange={e => setNewChannelId(e.target.value)}
+              style={{flex: '1 1 200px', fontFamily: 'var(--font-mono)', fontSize: '0.82rem'}}
+            />
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="Display Name (e.g. Fireship)"
+              value={newChannelName}
+              onChange={e => setNewChannelName(e.target.value)}
+              style={{flex: '1 1 150px'}}
+            />
+            <button
+              className="btn btn-neon"
+              disabled={!newChannelId.trim() || !newChannelName.trim()}
+              onClick={() => {
+                const updated = [...channels, { id: newChannelId.trim(), name: newChannelName.trim() }];
+                setChannels(updated);
+                const obj: Record<string,string> = {};
+                updated.forEach(c => { obj[c.id] = c.name; });
+                updateSetting({ suggested_channels: obj });
+                setNewChannelId('');
+                setNewChannelName('');
+              }}
+            >
+              <Plus size={16} /> Add Channel
+            </button>
           </div>
         </div>
 
