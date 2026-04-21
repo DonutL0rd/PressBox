@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Tv, Video, Settings, Music, Radio, PanelLeftClose, PanelLeftOpen, Box } from 'lucide-react';
+import { Tv, Video, Settings, Music, PanelLeftClose, PanelLeftOpen, Box } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 
-const Sidebar: React.FC = () => {
+const Sidebar: React.FC = React.memo(() => {
   const { connected } = useTvAutomator();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -22,15 +22,6 @@ const Sidebar: React.FC = () => {
       </div>
 
       <nav className="nav-menu">
-        <NavLink
-          to="/"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Now Playing"
-        >
-          <Radio className="nav-icon" size={18} />
-          {!collapsed && <span>Now Playing</span>}
-        </NavLink>
-
         <NavLink
           to="/mlb"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -91,6 +82,6 @@ const Sidebar: React.FC = () => {
       </button>
     </aside>
   );
-};
+});
 
 export default Sidebar;

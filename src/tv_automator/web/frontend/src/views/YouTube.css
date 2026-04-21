@@ -84,6 +84,57 @@
   cursor: not-allowed;
 }
 
+/* ── Playback Controls ────────────────────────────────── */
+
+.yt-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.yt-ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.yt-ctrl-time {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.yt-ctrl-time:last-of-type { text-align: right; }
+
+.yt-ctrl-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--red) 0%, var(--red) var(--pct, 0%), rgba(255,255,255,0.1) var(--pct, 0%));
+  outline: none;
+  cursor: pointer;
+}
+
+.yt-ctrl-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--red);
+  cursor: pointer;
+}
+
 /* ── Scrollable Body ───────────────────────────────────── */
 
 .yt-scroll-body {

@@ -8,7 +8,8 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--color-surface);
   flex-shrink: 0;
-  animation: fade-in-up 0.2s ease-out;
+  position: relative;
+  z-index: 201;
 }
 
 /* Info section (left) */
@@ -106,5 +107,5 @@
 }
 
 .npb-volume .volume-slider {
-  width: 100px;
+  width: 140px;
 }

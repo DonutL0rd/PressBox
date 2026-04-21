@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
-import { Play, Clock, Trash2, History, Radio, Video } from 'lucide-react';
+import { Play, Pause, Clock, Trash2, History, Radio, Video, Subtitles, Power } from 'lucide-react';
 import './YouTube.css';
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ const VideoCard: React.FC<{
   completed?: boolean;
   onPlay: (id: string, resume?: number) => void;
   onDelete?: (id: string) => void;
-}> = ({ videoId, title, thumbnail, channel, time, duration, position, completed, onPlay, onDelete }) => {
+}> = React.memo(({ videoId, title, thumbnail, channel, time, duration, position, completed, onPlay, onDelete }) => {
   const progress = duration && duration > 0 && position ? Math.min((position / duration) * 100, 100) : 0;
   const hasProgress = progress > 0 && !completed;
 
@@ -144,13 +144,80 @@ const VideoCard: React.FC<{
       </div>
     </div>
   );
+});
+
+// ── YouTube Playback Controls (shown when a video is active) ─────
+
+const YtControls: React.FC<{ onStop: () => void }> = ({ onStop }) => {
+  const [st, setSt] = useState<{ currentTime: number; duration: number; paused: boolean } | null>(null);
+  const [seek, setSeek] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const [cc, setCc] = useState(false);
+  const dragging = useRef(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const cmd = (body: object) => fetch('/api/youtube/command', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).catch(() => {});
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/youtube/state');
+        if (r.ok) {
+          const d = await r.json();
+          setSt(d);
+          if (!dragging.current) setSeek(d.currentTime || 0);
+        }
+      } catch {}
+    };
+    poll();
+    pollRef.current = setInterval(poll, 5000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const dur = st?.duration || 0;
+  const paused = st?.paused ?? true;
+  const pct = dur > 0 ? Math.min((seek / dur) * 100, 100) : 0;
+
+  return (
+    <div className="yt-controls">
+      <div className="yt-ctrl-row">
+        <button className="btn-icon" onClick={() => { cmd({ cmd: paused ? 'play' : 'pause' }); setSt(p => p ? { ...p, paused: !p.paused } : p); }}
+          style={{ color: 'var(--red)' }}>
+          {paused ? <Play size={22} fill="currentColor" /> : <Pause size={22} fill="currentColor" />}
+        </button>
+        <span className="yt-ctrl-time">{fmtDuration(seek)}</span>
+        <input type="range" className="yt-ctrl-seek" min={0} max={dur || 100} step={1} value={seek}
+          style={{ '--pct': `${pct}%` } as React.CSSProperties}
+          onChange={e => { dragging.current = true; setSeek(Number(e.target.value)); }}
+          onMouseUp={e => { dragging.current = false; cmd({ cmd: 'seek', time: Number((e.target as HTMLInputElement).value) }); }}
+          onTouchEnd={e => { dragging.current = false; cmd({ cmd: 'seek', time: Number((e.target as HTMLInputElement).value) }); }}
+        />
+        <span className="yt-ctrl-time">-{fmtDuration(Math.max(0, dur - seek))}</span>
+      </div>
+      <div className="yt-ctrl-row" style={{ justifyContent: 'center', gap: '12px' }}>
+        <select className="sc-select" value={speed} onChange={e => { const r = Number(e.target.value); setSpeed(r); cmd({ cmd: 'speed', rate: r }); }}>
+          <option value={0.5}>0.5x</option><option value={0.75}>0.75x</option><option value={1}>1x</option>
+          <option value={1.25}>1.25x</option><option value={1.5}>1.5x</option><option value={2}>2x</option>
+        </select>
+        <button className={`btn-icon ${cc ? 'active' : ''}`} title="Captions" onClick={() => { const v = !cc; setCc(v); cmd({ cmd: 'cc', enabled: v }); }}>
+          <Subtitles size={18} />
+        </button>
+        <button className="btn npb-stop-btn" style={{ padding: '4px 12px', fontSize: '0.78rem' }} onClick={onStop}>
+          <Power size={13} /> Stop
+        </button>
+      </div>
+    </div>
+  );
 };
 
 // ── Main YouTube Component ───────────────────────────────────────
 
 const YouTube: React.FC = () => {
-  const { playYoutube } = useTvAutomator();
+  const { playYoutube, status, stopPlayback } = useTvAutomator();
   const [url, setUrl] = useState('');
+  const isPlaying = status.youtube_mode && !status.now_playing_game_id;
 
   // Data state
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -201,7 +268,6 @@ const YouTube: React.FC = () => {
   const handlePlay = (videoId: string, resumePosition?: number) => {
     const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
     if (resumePosition && resumePosition > 5) {
-      // Use the backend's resume support
       fetch('/api/youtube', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,7 +288,7 @@ const YouTube: React.FC = () => {
   // ── Partition history ──────────────────────────────────────────
 
   const continueWatching = history.filter(h => !h.completed && h.position > 5);
-  const recentlyWatched = history.filter(h => h.completed || h.position <= 5);
+  const recentlyWatched  = history.filter(h => h.completed || h.position <= 5);
 
   // ── Channel keys ───────────────────────────────────────────────
 
@@ -256,6 +322,9 @@ const YouTube: React.FC = () => {
           <Play size={16} /> Cast to TV
         </button>
       </form>
+
+      {/* ── Playback Controls (when video is active) ──────────── */}
+      {isPlaying && <YtControls onStop={stopPlayback} />}
 
       {/* ── Scrollable Body ────────────────────────────────────── */}
       <div className="yt-scroll-body">

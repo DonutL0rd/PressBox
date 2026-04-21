@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Play, Disc, Radio as RadioIcon, User, Mic, ListMusic, Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Repeat1, Disc, Radio as RadioIcon, User, Mic, ListMusic, Plus, Trash2, Heart, Power } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 import './Music.css';
 
@@ -12,8 +12,91 @@ const formatTime = (sec: number) => {
   return `${m}:${s}`;
 };
 
+// ── Inline music transport (shown when music is playing) ────────
+
+const MusicTransport: React.FC = () => {
+  const { music } = useTvAutomator();
+  const song = music.song;
+  const isPaused = music.paused ?? true;
+  const duration = music.duration ?? 0;
+  const RepeatIcon = music.repeat === 'one' ? Repeat1 : Repeat;
+
+  const [pos, setPos] = useState(music.position ?? 0);
+  const [seeking, setSeeking] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Sync position from WS
+  useEffect(() => { if (!seeking) setPos(music.position ?? 0); }, [music.position, seeking]);
+
+  // Local tick for smooth progress
+  useEffect(() => {
+    if (tickRef.current) clearInterval(tickRef.current);
+    if (music.playing && !isPaused && !seeking) {
+      tickRef.current = setInterval(() => setPos(p => Math.min(p + 1, duration)), 1000);
+    }
+    return () => { if (tickRef.current) clearInterval(tickRef.current); };
+  }, [music.playing, isPaused, duration, seeking]);
+
+  // Check liked status
+  useEffect(() => {
+    if (!song?.id) return;
+    fetch('/api/music/starred').then(r => r.ok ? r.json() : null)
+      .then((d: any) => { if (d) setLiked((d.song || []).some((s: any) => s.id === song.id)); })
+      .catch(() => {});
+  }, [song?.id]);
+
+  const cmd = (command: string, value?: any) => fetch('/api/music/command', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value !== undefined ? { command, value } : { command }),
+  }).catch(() => {});
+
+  if (!song) return null;
+  const pct = duration > 0 ? (pos / duration) * 100 : 0;
+
+  return (
+    <div className="mt-bar">
+      <img src={`/api/music/cover/${song.albumId || song.id}?size=80`} className="mt-art" alt=""
+        onError={(e: any) => { e.target.style.display = 'none'; }} />
+      <div className="mt-info">
+        <div className="mt-title">{song.title}</div>
+        <div className="mt-artist">{song.artist}</div>
+      </div>
+      <div className="mt-transport">
+        <button className={`btn-icon ${music.shuffle ? 'active' : ''}`} onClick={() => cmd('shuffle')}><Shuffle size={16} /></button>
+        <button className="btn-icon" onClick={() => { setPos(0); cmd('prev'); }}><SkipBack size={20} fill="currentColor" /></button>
+        <button className="btn-icon mt-play" onClick={() => cmd('toggle')}>
+          {isPaused ? <Play size={24} fill="currentColor" /> : <Pause size={24} fill="currentColor" />}
+        </button>
+        <button className="btn-icon" onClick={() => { setPos(0); cmd('next'); }}><SkipForward size={20} fill="currentColor" /></button>
+        <button className={`btn-icon ${music.repeat !== 'off' ? 'active' : ''}`} onClick={() => cmd('repeat')}><RepeatIcon size={16} /></button>
+      </div>
+      <div className="mt-progress">
+        <span className="mt-time">{formatTime(pos)}</span>
+        <input type="range" className="mt-seek" min={0} max={duration || 1} step={1} value={pos}
+          style={{ '--pct': `${pct}%` } as React.CSSProperties}
+          onMouseDown={() => setSeeking(true)} onTouchStart={() => setSeeking(true)}
+          onChange={e => setPos(parseFloat(e.target.value))}
+          onMouseUp={() => { setSeeking(false); cmd('seek', pos); }}
+          onTouchEnd={() => { setSeeking(false); cmd('seek', pos); }}
+        />
+        <span className="mt-time">-{formatTime(Math.max(0, duration - pos))}</span>
+      </div>
+      <div className="mt-actions">
+        <button className={`btn-icon ${liked ? 'active' : ''}`} onClick={() => {
+          const v = !liked; setLiked(v);
+          fetch('/api/music/star', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: song.id, action: v ? 'star' : 'unstar' }) });
+        }} title={liked ? 'Unlike' : 'Like'}><Heart size={16} fill={liked ? 'var(--green)' : 'none'} color={liked ? 'var(--green)' : undefined} /></button>
+        <button className="btn-icon" onClick={() => cmd('stop')} title="Stop"><Power size={16} /></button>
+      </div>
+    </div>
+  );
+};
+
 const Music: React.FC = () => {
-  const { queue: queueState } = useTvAutomator();
+  const { queue: queueState, music } = useTvAutomator();
+  const isMusicActive = !!(music.song && music.playing);
 
   const [activeTab, setActiveTab] = useState<Tab>('Albums');
   const [items, setItems] = useState<any[]>([]);
@@ -115,6 +198,9 @@ const Music: React.FC = () => {
             <ListMusic size={20} />
           </button>
         </div>
+
+        {/* Transport — visible when music is playing */}
+        {isMusicActive && <MusicTransport />}
 
         {!selectedAlbum ? (
           <>

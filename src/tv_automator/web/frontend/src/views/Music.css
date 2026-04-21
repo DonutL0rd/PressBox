@@ -103,70 +103,6 @@
   margin-top: 2px;
 }
 
-/* Transport Bar */
-.transport-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  border-radius: 8px;
-  background: var(--color-surface);
-  border: 1px solid var(--border-subtle);
-  margin-top: 12px;
-  flex-shrink: 0;
-}
-
-.now-playing-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-}
-
-.now-playing-art {
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
-  object-fit: cover;
-}
-
-.transport-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.btn-icon {
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 4px;
-  transition: all var(--trans-fast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-icon:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--accent);
-}
-
-.btn-icon.active {
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
-/* Volume Slider */
-.volume-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 140px;
-}
-
 .volume-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -289,4 +225,106 @@
 .queue-item-artist {
   font-size: 0.72rem;
   color: var(--text-tertiary);
+}
+
+/* ── Music Transport ─────────────────────────────────── */
+.mt-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.mt-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.mt-info {
+  min-width: 0;
+  flex: 0 1 160px;
+}
+
+.mt-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mt-artist {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.mt-transport {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mt-play {
+  width: 40px;
+  height: 40px;
+  border-radius: 50% !important;
+  background: var(--accent-dim) !important;
+  color: var(--accent) !important;
+}
+
+.mt-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 200px;
+  min-width: 120px;
+}
+
+.mt-time {
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  width: 36px;
+  flex-shrink: 0;
+}
+
+.mt-time:last-child { text-align: right; }
+
+.mt-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--pct, 0%), rgba(255,255,255,0.1) var(--pct, 0%));
+  outline: none;
+  cursor: pointer;
+}
+
+.mt-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.mt-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
