@@ -1168,16 +1168,24 @@ def _get_http_client() -> httpx.AsyncClient:
 
 
 @app.get("/api/pitches")
-async def get_pitches():
+async def get_pitches(game_id: str | None = None):
     """Return pitch data, batter intel, and between-innings break data."""
     global _last_batter_id
 
     empty = {"pitches": [], "batter": "", "pitcher": "", "count": "", "outs": 0,
              "inning": "", "batter_intel": None, "break_data": None}
-    if not _now_playing_game_id:
-        return empty
+
+    target_id = game_id or _now_playing_game_id
+    if not target_id:
+        # Fallback: pick the first live game from the scheduler
+        live_games = [g for g in _scheduler.get_games_for_provider("mlb") if g.status == GameStatus.LIVE]
+        if live_games:
+            target_id = live_games[0].game_id
+        else:
+            return empty
+
     try:
-        url = f"https://statsapi.mlb.com/api/v1.1/game/{_now_playing_game_id}/feed/live"
+        url = f"https://statsapi.mlb.com/api/v1.1/game/{target_id}/feed/live"
         client = _get_http_client()
         resp = await client.get(url)
         if resp.status_code != 200:
@@ -1314,13 +1322,47 @@ async def get_pitches():
                 "inning": inning_str,
             }
 
+        # ── Runners ─────────────────────────────────────
+        offense = linescore.get("offense", {})
+        runners = {
+            "first": "first" in offense,
+            "second": "second" in offense,
+            "third": "third" in offense
+        }
+
+        # ── Teams & Score ───────────────────────────────
+        ls_teams = linescore.get("teams", {})
+        gd_teams = data.get("gameData", {}).get("teams", {})
+        score = {
+            "away": ls_teams.get("away", {}).get("runs", 0),
+            "home": ls_teams.get("home", {}).get("runs", 0),
+            "away_abbr": gd_teams.get("away", {}).get("abbreviation", ""),
+            "home_abbr": gd_teams.get("home", {}).get("abbreviation", ""),
+        }
+
+        # ── Simplified Linescore ────────────────────────
+        innings_list = []
+        for inn in linescore.get("innings", []):
+            innings_list.append({
+                "num": inn.get("num"),
+                "away": inn.get("away", {}).get("runs"),
+                "home": inn.get("home", {}).get("runs"),
+            })
+
         return {
+            "game_id": target_id,
             "pitches": pitches,
             "batter": batter_name,
             "pitcher": pitcher_name,
             "count": count_str,
+            "balls": balls,
+            "strikes": strikes,
             "outs": outs,
             "inning": inning_str,
+            "inning_state": inning_state,
+            "runners": runners,
+            "score": score,
+            "linescore": innings_list,
             "zone_top": zone_top,
             "zone_bot": zone_bot,
             "batter_intel": batter_intel,
