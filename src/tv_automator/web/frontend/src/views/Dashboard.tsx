@@ -118,7 +118,7 @@ const StreamControls: React.FC = () => {
           </label>
         </div>
         <div className="sc-row">
-          <span className="sc-label">Strike Zone</span>
+          <span className="sc-label">Pitch Tracker</span>
           <label className="switch">
             <input type="checkbox" checked={settings.strike_zone_enabled !== false} onChange={e => updateSetting({ strike_zone_enabled: e.target.checked })} />
             <span className="slider"></span>
@@ -148,7 +148,7 @@ const StreamControls: React.FC = () => {
           </div>
         </div>
         <div className="sc-row">
-          <span className="sc-label">Zone Size</span>
+          <span className="sc-label">Tracker Size</span>
           <select className="sc-select" value={settings.strike_zone_size || 'medium'} onChange={e => updateSetting({ strike_zone_size: e.target.value })}>
             <option value="small">Small</option>
             <option value="medium">Medium</option>
@@ -184,11 +184,16 @@ const GameDetailPanel: React.FC<{
     setError(null);
     setLoading(true);
 
+    let prevJson = '';
     const load = async () => {
       try {
         const r = await fetch(`/api/game/${game.game_id}/stats`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
+        const text = await r.text();
+        // Skip re-render if data is identical to previous fetch
+        if (text === prevJson) return;
+        prevJson = text;
+        const data = JSON.parse(text);
         if (!cancelled) setStats(data);
       } catch (e: any) {
         if (!cancelled) setError(e.message || 'Failed to load stats');

@@ -27,7 +27,7 @@ const Settings: React.FC = () => {
   // Derived App Settings
   const autoStart = !!settings.auto_start;
   const defaultFeed = settings.default_feed || 'HOME';
-  const strikeZone = !!settings.strike_zone_enabled;
+  const strikeZone = settings.strike_zone_enabled !== false;
   const strikeZoneSize = settings.strike_zone_size || 'medium';
   const batterIntel = settings.batter_intel_enabled !== false;
   const betweenInnings = settings.between_innings_enabled !== false;
@@ -225,8 +225,8 @@ const Settings: React.FC = () => {
 
           <div className="settings-field-row">
             <div>
-              <div className="settings-label">Strike Zone Overlay</div>
-              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Show live pitch locations</div>
+              <div className="settings-label">Pitch Tracker</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Show live pitch locations and strike zone</div>
             </div>
             <label className="switch">
               <input type="checkbox" checked={strikeZone} onChange={e => {
@@ -237,7 +237,7 @@ const Settings: React.FC = () => {
           </div>
 
           <div className="settings-field-row">
-            <div className="settings-label">Strike Zone Size</div>
+            <div className="settings-label">Tracker Size</div>
             <select className="settings-input settings-select" style={{width: 'auto'}} value={strikeZoneSize} onChange={e => {
               updateSetting({ strike_zone_size: e.target.value });
             }}>

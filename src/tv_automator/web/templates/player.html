@@ -252,7 +252,7 @@
     // Start polling only for live games
     if (!isCondensed && szEnabled) {
       szPollTimer = setInterval(pollPitches, 6000);
-      setTimeout(pollPitches, 2000);
+      setTimeout(pollPitches, 500);
     }
     
     connectWs();
@@ -342,8 +342,8 @@
       showStatus('HLS not supported', 'error'); return;
     }
     hls = new Hls({
-      maxBufferLength: 30, maxMaxBufferLength: 120,
-      liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6, enableWorker: true,
+      maxBufferLength: 60, maxMaxBufferLength: 600,
+      liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, enableWorker: true,
     });
     hls.loadSource(url);
     hls.attachMedia(video);
@@ -410,6 +410,7 @@
   var batterCardTimer = null;
   var breakActive = false;
   var overlayUpdateTimer = null;
+  var szEverShown = false;  // once shown with valid data, keep visible
 
   // ── SVG coordinate mapping ────────────────────────
   // The SVG box runs from y=20 (top) to y=130 (bottom), x=30 to x=110.
@@ -599,11 +600,14 @@
       showBatterCard(data.batter_intel);
     }
 
-    // Nothing playing
+    // No data yet — hide only if we've never shown the overlay this session.
+    // Once shown, keep it visible through brief data gaps (inning transitions).
     if (!data.pitcher && !data.batter) {
-      szOverlay.classList.remove('visible');
+      if (!szEverShown) szOverlay.classList.remove('visible');
       return;
     }
+
+    szEverShown = true;
 
     // Don't overwrite the batter card while it's showing
     if (biContent.style.display !== 'none') return;
@@ -641,7 +645,8 @@
       var data = await res.json();
 
       var breakEnding = breakActive && (!data.break_data || !data.break_data.active);
-      if (breakEnding || overlayDelayMs <= 0) {
+      // Show immediately on first display, break transitions, or zero delay
+      if (!szEverShown || breakEnding || overlayDelayMs <= 0) {
         clearTimeout(overlayUpdateTimer);
         applyOverlayData(data);
       } else {

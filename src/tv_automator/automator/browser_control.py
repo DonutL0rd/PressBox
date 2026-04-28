@@ -36,6 +36,14 @@ class BrowserController:
             "--start-fullscreen",
             f"--window-size={res.replace('x', ',')}",
             "--window-position=0,0",
+            # ── Performance: prefer GPU decode, reduce CPU pressure ──
+            "--enable-gpu-rasterization",
+            "--enable-zero-copy",
+            "--ignore-gpu-blocklist",
+            "--enable-features=VaapiVideoDecoder,VaapiVideoEncoder",
+            "--disable-features=UseChromeOSDirectVideoDecoder",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
         ]
 
         launch_kwargs = {

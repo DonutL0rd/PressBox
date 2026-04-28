@@ -84,6 +84,12 @@ _other_scores_cache: list[dict] = []
 _other_scores_cache_time: float = 0
 OTHER_SCORES_TTL = 30  # seconds
 
+# ── Shared httpx client (reuse connections) ────────────────────
+_http_client: httpx.AsyncClient | None = None
+
+# ── Music broadcast deduplication ──────────────────────────────
+_last_music_broadcast: str = ""
+
 # ── Suggested YouTube channels ──────────────────────────────────
 # channel_id → display name
 SUGGESTED_CHANNELS: dict[str, str] = {
@@ -253,6 +259,10 @@ async def lifespan(app: FastAPI):
     # Start the watchdog
     _watchdog_task = asyncio.create_task(_watchdog_loop())
 
+    # Shared httpx client for external API calls (connection pooling)
+    global _http_client
+    _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=10))
+
     # Navigate to screensaver once the server is ready (retry — browser starts before uvicorn binds)
     if _browser.is_running:
         asyncio.create_task(_initial_navigate())
@@ -268,6 +278,8 @@ async def lifespan(app: FastAPI):
     await _scheduler.stop()
     await _session.close()
     await _browser.stop()
+    if _http_client:
+        await _http_client.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -458,8 +470,14 @@ async def _broadcast_settings() -> None:
 
 
 async def _broadcast_music_status() -> None:
-    """Broadcast current music playback state to all WS clients."""
+    """Broadcast current music playback state to all WS clients (skips if unchanged)."""
+    global _last_music_broadcast
     data = await music_status()
+    # Only broadcast position changes at reduced fidelity to avoid flooding
+    key = f"{data.get('playing')}|{data.get('paused')}|{data.get('song', {}) or ''}|{int(data.get('position', 0))}"
+    if key == _last_music_broadcast:
+        return
+    _last_music_broadcast = key
     await _broadcast({"type": "music", **data})
 
 
@@ -1049,11 +1067,11 @@ async def _fetch_other_scores() -> list[dict]:
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=linescore"
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return _other_scores_cache
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return _other_scores_cache
+        data = resp.json()
         scores = []
         for date_entry in data.get("dates", []):
             for g in date_entry.get("games", []):
@@ -1141,6 +1159,14 @@ def _get_pitcher_summary(boxscore: dict, linescore: dict, inning_state: str) -> 
     }
 
 
+def _get_http_client() -> httpx.AsyncClient:
+    """Return the shared httpx client, or create a fallback."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=10))
+    return _http_client
+
+
 @app.get("/api/pitches")
 async def get_pitches():
     """Return pitch data, batter intel, and between-innings break data."""
@@ -1152,11 +1178,11 @@ async def get_pitches():
         return empty
     try:
         url = f"https://statsapi.mlb.com/api/v1.1/game/{_now_playing_game_id}/feed/live"
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return empty
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return empty
+        data = resp.json()
 
         live = data.get("liveData", {})
         linescore = live.get("linescore", {})
@@ -2513,7 +2539,7 @@ async def static_file(filename: str):
     if not path.is_file():
         raise HTTPException(404)
     media = "application/javascript" if filename.endswith(".js") else "application/octet-stream"
-    return FileResponse(path, media_type=media)
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/{filename}", include_in_schema=False)

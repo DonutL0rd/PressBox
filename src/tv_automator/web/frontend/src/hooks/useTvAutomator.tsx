@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 
 // ── Type definitions ────────────────────────────────────────────
 
@@ -84,6 +84,19 @@ interface TvAutomatorContextType {
   refreshStatus: () => Promise<void>;
   refreshGames: () => Promise<void>;
   updateSetting: (payload: any) => Promise<void>;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────
+
+/** Shallow-compare two objects — returns true if all top-level values are identical. */
+function shallowEqual(a: Record<string, any>, b: Record<string, any>): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
 }
 
 // ── Defaults ────────────────────────────────────────────────────
@@ -198,20 +211,32 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
           switch (data.type) {
             case 'status': {
               const { type: _, ...rest } = data;
-              setStatus(prev => ({ ...prev, ...rest }));
+              setStatus(prev => {
+                const merged = { ...prev, ...rest };
+                return shallowEqual(prev, merged) ? prev : merged;
+              });
               break;
             }
             case 'games':
-              if (Array.isArray(data.games)) setGames(data.games);
+              if (Array.isArray(data.games)) {
+                setGames(prev => {
+                  if (prev.length === data.games.length
+                    && JSON.stringify(prev) === JSON.stringify(data.games)) return prev;
+                  return data.games;
+                });
+              }
               break;
             case 'settings': {
               const { type: _, ...rest } = data;
-              setSettings(rest);
+              setSettings(prev => shallowEqual(prev, rest) ? prev : rest);
               break;
             }
             case 'music': {
               const { type: _, ...rest } = data;
-              setMusic(prev => ({ ...prev, ...rest }));
+              setMusic(prev => {
+                const merged = { ...prev, ...rest };
+                return shallowEqual(prev, merged) ? prev : merged;
+              });
               break;
             }
             case 'volume':
@@ -224,7 +249,11 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
               }
               break;
             case 'queue':
-              setQueue({ songs: data.songs || [], index: data.index ?? -1 });
+              setQueue(prev => {
+                if (prev.index === (data.index ?? -1)
+                  && prev.songs.length === (data.songs?.length ?? 0)) return prev;
+                return { songs: data.songs || [], index: data.index ?? -1 };
+              });
               break;
             case 'autoplay':
               // Handled by views that need it
@@ -294,12 +323,15 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
     } catch {}
   }, []);
 
+  const value = useMemo(() => ({
+    games, status, settings, music, volume, queue, connected,
+    alert, clearAlert, showAlert,
+    playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting,
+  }), [games, status, settings, music, volume, queue, connected, alert,
+       clearAlert, showAlert, playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting]);
+
   return (
-    <TvAutomatorContext.Provider value={{
-      games, status, settings, music, volume, queue, connected,
-      alert, clearAlert, showAlert,
-      playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting,
-    }}>
+    <TvAutomatorContext.Provider value={value}>
       {children}
     </TvAutomatorContext.Provider>
   );
