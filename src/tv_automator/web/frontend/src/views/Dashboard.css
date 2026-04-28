@@ -30,24 +30,6 @@
   text-align: center;
 }
 
-.btn-icon {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--trans-fast);
-}
-
-.btn-icon:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-primary);
-}
-
 .dash-filters {
   display: flex;
   gap: 6px;
@@ -491,4 +473,36 @@
 
 .detail-error {
   color: var(--red);
+}
+
+/* ── Stream Controls ── */
+.sc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sc-label {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sc-select {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.sc-select option {
+  background: var(--color-surface);
+  color: var(--text-primary);
 }

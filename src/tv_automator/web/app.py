@@ -60,6 +60,7 @@ _player_command: dict | None = None  # pending command for player (consumed on r
 _youtube_video_id: str | None = None   # currently playing YouTube video ID
 _autoplay_queue: dict | None = None  # {game_id, feed, display_matchup, display_time}
 _play_lock: asyncio.Lock
+_music_lock: asyncio.Lock
 _heartbeat_task: asyncio.Task | None = None
 _watchdog_task: asyncio.Task | None = None
 _expiry_task: asyncio.Task | None = None
@@ -82,6 +83,12 @@ _batter_vs_pitcher_cache: dict[tuple[int, int], dict | None] = {}
 _other_scores_cache: list[dict] = []
 _other_scores_cache_time: float = 0
 OTHER_SCORES_TTL = 30  # seconds
+
+# ── Shared httpx client (reuse connections) ────────────────────
+_http_client: httpx.AsyncClient | None = None
+
+# ── Music broadcast deduplication ──────────────────────────────
+_last_music_broadcast: str = ""
 
 # ── Suggested YouTube channels ──────────────────────────────────
 # channel_id → display name
@@ -211,7 +218,7 @@ def _stop_progress_task() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _watchdog_task
+    global _config, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _music_lock, _watchdog_task
     _config = Config()
     _load_history()
     _browser = BrowserController(_config)
@@ -222,6 +229,7 @@ async def lifespan(app: FastAPI):
     _scheduler.register_provider(_mlb)
     _scheduler.set_on_refresh(_on_schedule_refresh)
     _play_lock = asyncio.Lock()
+    _music_lock = asyncio.Lock()
 
     global _browser_started_at
     try:
@@ -251,6 +259,10 @@ async def lifespan(app: FastAPI):
     # Start the watchdog
     _watchdog_task = asyncio.create_task(_watchdog_loop())
 
+    # Shared httpx client for external API calls (connection pooling)
+    global _http_client
+    _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=10))
+
     # Navigate to screensaver once the server is ready (retry — browser starts before uvicorn binds)
     if _browser.is_running:
         asyncio.create_task(_initial_navigate())
@@ -266,6 +278,8 @@ async def lifespan(app: FastAPI):
     await _scheduler.stop()
     await _session.close()
     await _browser.stop()
+    if _http_client:
+        await _http_client.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -285,14 +299,20 @@ async def _initial_navigate() -> None:
 async def _heartbeat_loop() -> None:
     """Send periodic heartbeats to keep the MLB stream alive."""
     while True:
-        if not _stream_info or not _stream_info.heartbeat_url:
+        info = _stream_info  # capture reference; may be replaced by reconnect
+        if not info or not info.heartbeat_url:
             return
-        await asyncio.sleep(_stream_info.heartbeat_interval)
-        ok = await _session.send_heartbeat(_stream_info.heartbeat_url)
+        await asyncio.sleep(info.heartbeat_interval)
+        ok = await _session.send_heartbeat(info.heartbeat_url)
         if ok:
             log.debug("Heartbeat OK")
         else:
             log.warning("Heartbeat failed — stream may drop soon")
+            await _broadcast({
+                "type": "error",
+                "code": "heartbeat_failed",
+                "message": "Stream heartbeat failed — video may freeze soon",
+            })
 
 
 def _start_heartbeat() -> None:
@@ -428,6 +448,7 @@ async def _broadcast_status() -> None:
         "type": "status",
         "now_playing_game_id": _now_playing_game_id,
         "youtube_mode": _youtube_mode,
+        "youtube_video_id": _youtube_video_id,
         "authenticated": _session.is_authenticated,
         "browser_running": _browser.is_running,
         "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
@@ -449,8 +470,14 @@ async def _broadcast_settings() -> None:
 
 
 async def _broadcast_music_status() -> None:
-    """Broadcast current music playback state to all WS clients."""
+    """Broadcast current music playback state to all WS clients (skips if unchanged)."""
+    global _last_music_broadcast
     data = await music_status()
+    # Only broadcast position changes at reduced fidelity to avoid flooding
+    key = f"{data.get('playing')}|{data.get('paused')}|{data.get('song', {}) or ''}|{int(data.get('position', 0))}"
+    if key == _last_music_broadcast:
+        return
+    _last_music_broadcast = key
     await _broadcast({"type": "music", **data})
 
 
@@ -615,7 +642,7 @@ async def _do_play(game_id: str, feed: str) -> StreamInfo:
     return info
 
 
-async def _do_reconnect() -> StreamInfo | None:
+async def _do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
     """Get a fresh stream URL for the current game and reload the player."""
     global _stream_info
 
@@ -633,12 +660,26 @@ async def _do_reconnect() -> StreamInfo | None:
             url = await _get_condensed_url(_now_playing_game_id)
             if not url:
                 log.error("Reconnect failed — condensed game not available")
+                await _broadcast({
+                    "type": "error",
+                    "code": "stream_error",
+                    "message": "Stream reconnect failed — condensed game not available",
+                })
+                if schedule_retry:
+                    asyncio.create_task(_reconnect_with_retry())
                 return None
             info = StreamInfo(url=url, direct=True)
         else:
             info = await _session.get_stream_info(_now_playing_game_id, _now_playing_feed)
             if not info:
                 log.error("Reconnect failed — no stream URL")
+                await _broadcast({
+                    "type": "error",
+                    "code": "stream_error",
+                    "message": "Stream reconnect failed — retrying…",
+                })
+                if schedule_retry:
+                    asyncio.create_task(_reconnect_with_retry())
                 return None
             _start_heartbeat()
             _start_expiry_timer()
@@ -649,7 +690,38 @@ async def _do_reconnect() -> StreamInfo | None:
         return info
     except Exception:
         log.exception("Reconnect failed")
+        await _broadcast({
+            "type": "error",
+            "code": "stream_error",
+            "message": "Stream reconnect failed — retrying…",
+        })
+        if schedule_retry:
+            asyncio.create_task(_reconnect_with_retry())
         return None
+
+
+async def _reconnect_with_retry() -> None:
+    """Retry _do_reconnect up to 3 times with 30-second delays between attempts."""
+    for attempt in range(1, 4):
+        await asyncio.sleep(30)
+        if not _now_playing_game_id:
+            return  # User stopped playback while waiting
+        log.info("Reconnect retry %d/3 for game %s...", attempt, _now_playing_game_id)
+        result = await _do_reconnect(schedule_retry=False)
+        if result:
+            await _broadcast({
+                "type": "info",
+                "code": "stream_recovered",
+                "message": "Stream reconnected successfully",
+            })
+            return
+    # All retries exhausted
+    log.error("Stream reconnect gave up after 3 attempts for game %s", _now_playing_game_id)
+    await _broadcast({
+        "type": "error",
+        "code": "stream_dead",
+        "message": "Stream could not reconnect — stop and restart playback",
+    })
 
 
 async def _do_stop() -> None:
@@ -679,14 +751,15 @@ async def _do_stop() -> None:
 
 
 async def _stop_music_internal() -> None:
-    """Stop music playback and clear the queue. Safe to call within _play_lock."""
+    """Stop music playback and clear the queue."""
     global _music_queue_index, _music_watcher_task
     if _music_watcher_task and not _music_watcher_task.done():
         _music_watcher_task.cancel()
         _music_watcher_task = None
-    await _mpv_stop()
-    _music_queue.clear()
-    _music_queue_index = -1
+    async with _music_lock:
+        await _mpv_stop()
+        _music_queue.clear()
+        _music_queue_index = -1
 
 
 async def _stop_video_for_music() -> None:
@@ -994,11 +1067,11 @@ async def _fetch_other_scores() -> list[dict]:
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}&hydrate=linescore"
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return _other_scores_cache
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return _other_scores_cache
+        data = resp.json()
         scores = []
         for date_entry in data.get("dates", []):
             for g in date_entry.get("games", []):
@@ -1086,6 +1159,14 @@ def _get_pitcher_summary(boxscore: dict, linescore: dict, inning_state: str) -> 
     }
 
 
+def _get_http_client() -> httpx.AsyncClient:
+    """Return the shared httpx client, or create a fallback."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=10))
+    return _http_client
+
+
 @app.get("/api/pitches")
 async def get_pitches():
     """Return pitch data, batter intel, and between-innings break data."""
@@ -1097,11 +1178,11 @@ async def get_pitches():
         return empty
     try:
         url = f"https://statsapi.mlb.com/api/v1.1/game/{_now_playing_game_id}/feed/live"
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return empty
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return empty
+        data = resp.json()
 
         live = data.get("liveData", {})
         linescore = live.get("linescore", {})
@@ -1149,6 +1230,13 @@ async def get_pitches():
                 "zone_top": pd_ev.get("strikeZoneTop", 3.4),
                 "zone_bot": pd_ev.get("strikeZoneBottom", 1.6),
             })
+
+        # ── Zone dimensions (from latest pitch, or defaults) ──
+        zone_top = 3.4
+        zone_bot = 1.6
+        if pitches:
+            zone_top = pitches[-1].get("zone_top", 3.4)
+            zone_bot = pitches[-1].get("zone_bot", 1.6)
 
         # ── Batter intel ────────────────────────────────
         batter_intel = None
@@ -1233,6 +1321,8 @@ async def get_pitches():
             "count": count_str,
             "outs": outs,
             "inning": inning_str,
+            "zone_top": zone_top,
+            "zone_bot": zone_bot,
             "batter_intel": batter_intel,
             "break_data": break_data,
         }
@@ -1933,34 +2023,36 @@ _music_watcher_task: asyncio.Task | None = None
 
 async def _music_watch_playback():
     """Watch mpv for track end and auto-advance the queue. Also broadcasts music status."""
-    global _music_queue_index
     _tick = 0
     while True:
         await asyncio.sleep(1)
         _tick += 1
-        if not _mpv_proc or _mpv_proc.returncode is not None:
-            # mpv exited — track ended
+
+        # Check process state outside the lock — reads are safe without it.
+        proc_done = not _mpv_proc or _mpv_proc.returncode is not None
+        idle = False
+        if not proc_done:
+            idle = await _mpv_get_property("idle-active") or False
+
+        if proc_done or idle:
             if not _music_queue:
                 break
-            if _music_repeat == "one":
-                await _music_play_current()
-                continue
-            result = await _music_advance(1)
+            async with _music_lock:
+                # Re-check inside the lock: a command may have already advanced while
+                # we were waiting to acquire it.
+                if _mpv_proc and _mpv_proc.returncode is None:
+                    still_idle = await _mpv_get_property("idle-active") or False
+                    if not still_idle:
+                        continue  # A command already started new playback
+                if _music_repeat == "one":
+                    await _music_play_current()
+                    continue
+                result = await _music_advance(1)
             if result is None:
                 break  # End of queue
             await _broadcast_music_queue()
             continue
-        # Check if mpv is idle (finished playing)
-        idle = await _mpv_get_property("idle-active")
-        if idle:
-            if _music_repeat == "one":
-                await _music_play_current()
-                continue
-            result = await _music_advance(1)
-            if result is None:
-                break
-            await _broadcast_music_queue()
-            continue
+
         # Broadcast music status every 2 seconds for position updates
         if _tick % 2 == 0 and _ws_clients:
             await _broadcast_music_status()
@@ -2095,16 +2187,17 @@ async def music_play(body: dict):
         raise HTTPException(400, "No songs provided")
     async with _play_lock:
         await _stop_video_for_music()
-    _music_queue = [
-        {"id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
-         "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0)}
-        for s in songs
-    ]
-    _music_queue_index = index
-    if _music_shuffle:
-        _music_build_shuffle_order()
-    await _music_play_current()
-    _music_start_watcher()
+    async with _music_lock:
+        _music_queue[:] = [
+            {"id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
+             "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0)}
+            for s in songs
+        ]
+        _music_queue_index = index
+        if _music_shuffle:
+            _music_build_shuffle_order()
+        await _music_play_current()
+        _music_start_watcher()
     await _broadcast_music_status()
     await _broadcast_music_queue()
     return {"playing": True, "song": _music_queue[_music_queue_index]}
@@ -2127,19 +2220,21 @@ async def music_command(body: dict):
         await _mpv_set_property("pause", not paused)
         result["paused"] = not paused
     elif cmd == "next":
-        result["song"] = await _music_advance(1)
+        async with _music_lock:
+            result["song"] = await _music_advance(1)
+            _music_start_watcher()
         queue_changed = True
     elif cmd == "prev":
         pos = await _mpv_get_property("time-pos")
         if pos and pos > 3:
             await _mpv_command("seek", 0, "absolute")
         else:
-            result["song"] = await _music_advance(-1)
+            async with _music_lock:
+                result["song"] = await _music_advance(-1)
+                _music_start_watcher()
             queue_changed = True
     elif cmd == "stop":
-        await _mpv_stop()
-        _music_queue.clear()
-        _music_queue_index = -1
+        await _stop_music_internal()
         queue_changed = True
     elif cmd == "seek":
         val = body.get("value", 0)
@@ -2149,25 +2244,28 @@ async def music_command(body: dict):
         await _mpv_set_property("volume", val)
     elif cmd == "jump":
         idx = int(body.get("value", 0))
-        if 0 <= idx < len(_music_queue):
-            _music_queue_index = idx
-            await _music_play_current()
-            _music_start_watcher()
-            queue_changed = True
-        else:
-            raise HTTPException(400, "Invalid queue index")
+        async with _music_lock:
+            if 0 <= idx < len(_music_queue):
+                _music_queue_index = idx
+                await _music_play_current()
+                _music_start_watcher()
+                queue_changed = True
+            else:
+                raise HTTPException(400, "Invalid queue index")
     elif cmd == "shuffle":
-        _music_shuffle = body.get("value", not _music_shuffle)
-        if _music_shuffle:
-            _music_build_shuffle_order()
-        else:
-            _music_shuffle_order.clear()
-        result["shuffle"] = _music_shuffle
+        async with _music_lock:
+            _music_shuffle = body.get("value", not _music_shuffle)
+            if _music_shuffle:
+                _music_build_shuffle_order()
+            else:
+                _music_shuffle_order.clear()
+            result["shuffle"] = _music_shuffle
     elif cmd == "repeat":
-        modes = ["off", "all", "one"]
-        idx = modes.index(_music_repeat) if _music_repeat in modes else 0
-        _music_repeat = modes[(idx + 1) % 3]
-        result["repeat"] = _music_repeat
+        async with _music_lock:
+            modes = ["off", "all", "one"]
+            idx = modes.index(_music_repeat) if _music_repeat in modes else 0
+            _music_repeat = modes[(idx + 1) % 3]
+            result["repeat"] = _music_repeat
     else:
         raise HTTPException(400, f"Unknown command: {cmd}")
 
@@ -2283,20 +2381,24 @@ async def music_queue_append(body: dict):
     songs = body.get("songs", [])
     if not songs:
         raise HTTPException(400, "No songs provided")
-    for s in songs:
-        _music_queue.append({
-            "id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
-            "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0),
-        })
-    if _music_shuffle:
-        _music_build_shuffle_order()
-    # If nothing was playing, start from the first appended song
-    if _music_queue_index < 0:
+    need_start = False
+    async with _music_lock:
+        for s in songs:
+            _music_queue.append({
+                "id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
+                "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0),
+            })
+        if _music_shuffle:
+            _music_build_shuffle_order()
+        if _music_queue_index < 0:
+            need_start = True
+            _music_queue_index = 0
+    if need_start:
         async with _play_lock:
             await _stop_video_for_music()
-        _music_queue_index = 0
-        await _music_play_current()
-        _music_start_watcher()
+        async with _music_lock:
+            await _music_play_current()
+            _music_start_watcher()
     await _broadcast_music_queue()
     await _broadcast_music_status()
     return {"ok": True, "queue_length": len(_music_queue)}
@@ -2309,19 +2411,20 @@ async def music_queue_remove(body: dict):
     idx = body.get("index")
     if idx is None or idx < 0 or idx >= len(_music_queue):
         raise HTTPException(400, "Invalid index")
-    _music_queue.pop(idx)
-    if _music_shuffle:
-        _music_build_shuffle_order()
-    if idx < _music_queue_index:
-        _music_queue_index -= 1
-    elif idx == _music_queue_index:
-        if _music_queue:
-            _music_queue_index = min(_music_queue_index, len(_music_queue) - 1)
-            await _music_play_current()
-            _music_start_watcher()
-        else:
-            _music_queue_index = -1
-            await _mpv_stop()
+    async with _music_lock:
+        _music_queue.pop(idx)
+        if _music_shuffle:
+            _music_build_shuffle_order()
+        if idx < _music_queue_index:
+            _music_queue_index -= 1
+        elif idx == _music_queue_index:
+            if _music_queue:
+                _music_queue_index = min(_music_queue_index, len(_music_queue) - 1)
+                await _music_play_current()
+                _music_start_watcher()
+            else:
+                _music_queue_index = -1
+                await _mpv_stop()
     await _broadcast_music_queue()
     await _broadcast_music_status()
     return {"ok": True, "queue_length": len(_music_queue)}
@@ -2377,6 +2480,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "type": "status",
             "now_playing_game_id": _now_playing_game_id,
             "youtube_mode": _youtube_mode,
+            "youtube_video_id": _youtube_video_id,
             "authenticated": _session.is_authenticated,
             "browser_running": _browser.is_running,
             "heartbeat_active": _heartbeat_task is not None and not _heartbeat_task.done(),
@@ -2435,7 +2539,7 @@ async def static_file(filename: str):
     if not path.is_file():
         raise HTTPException(404)
     media = "application/javascript" if filename.endswith(".js") else "application/octet-stream"
-    return FileResponse(path, media_type=media)
+    return FileResponse(path, media_type=media, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/{filename}", include_in_schema=False)

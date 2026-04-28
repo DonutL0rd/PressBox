@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save, Video, Trash2, Plus, HelpCircle } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
@@ -6,7 +6,7 @@ import './Settings.css';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const { refreshStatus, refreshGames, settings, updateSetting } = useTvAutomator();
+  const { refreshStatus, refreshGames, settings, updateSetting, showAlert } = useTvAutomator();
 
   // MLB State
   const [mlbUsername, setMlbUsername] = useState('');
@@ -27,8 +27,11 @@ const Settings: React.FC = () => {
   // Derived App Settings
   const autoStart = !!settings.auto_start;
   const defaultFeed = settings.default_feed || 'HOME';
-  const strikeZone = !!settings.strike_zone_enabled;
+  const strikeZone = settings.strike_zone_enabled !== false;
   const strikeZoneSize = settings.strike_zone_size || 'medium';
+  const batterIntel = settings.batter_intel_enabled !== false;
+  const betweenInnings = settings.between_innings_enabled !== false;
+  const overlayDelay = settings.overlay_delay ?? 2;
   const cecEnabled = !!settings.cec_enabled;
   const pollInterval = settings.poll_interval || 60;
   const musicSize = settings.screensaver_music_size || 'medium';
@@ -43,13 +46,9 @@ const Settings: React.FC = () => {
   const [newChannelName, setNewChannelName] = useState('');
   const [showChannelHelp, setShowChannelHelp] = useState(false);
 
-  // Loading / Messages
-  const [toast, setToast] = useState<{msg: string, isError: boolean} | null>(null);
-
-  const showToast = (msg: string, isError = false) => {
-    setToast({ msg, isError });
-    setTimeout(() => setToast(null), 4000);
-  };
+  const notify = useCallback((msg: string, isError = false) => {
+    showAlert(msg, isError ? 'error' : 'info');
+  }, [showAlert]);
 
   const handleMlbSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,17 +61,17 @@ const Settings: React.FC = () => {
       });
       const data = await r.json();
       if (data.success) {
-        showToast("MLB Credentials Saved & Verified!");
+        notify("MLB Credentials Saved & Verified!");
         setMlbPassword(''); // Clear password field for security layout
         await refreshStatus();
         setTimeout(() => { refreshGames(); }, 500);
-        setTimeout(() => navigate('/'), 1000); // Navigate to Dashboard after toast
+        setTimeout(() => navigate('/'), 1000);
       } else {
-        showToast(data.error || "MLB Auth Failed", true);
+        notify(data.error || "MLB Auth Failed", true);
         await refreshStatus();
       }
     } catch (err) {
-      showToast("Network Error", true);
+      notify("Network Error", true);
     }
   };
 
@@ -87,13 +86,13 @@ const Settings: React.FC = () => {
       });
       const data = await r.json();
       if (data.success) {
-        showToast(`Navidrome Connected! System v${data.version}`);
+        notify(`Navidrome Connected! System v${data.version}`);
         setNavPass('');
       } else {
-        showToast(data.error || "Navidrome Connection Failed", true);
+        notify(data.error || "Navidrome Connection Failed", true);
       }
     } catch (err) {
-      showToast("Network Error", true);
+      notify("Network Error", true);
     }
   };
 
@@ -105,19 +104,6 @@ const Settings: React.FC = () => {
           <p className="page-subtitle">Configure hardware, credentials, and app behavior</p>
         </div>
       </div>
-
-      {toast && (
-        <div style={{
-          position: 'fixed', top: 20, right: 30, zIndex: 100,
-          background: toast.isError ? 'var(--red)' : 'var(--green)',
-          color: toast.isError ? '#fff' : '#000',
-          padding: '12px 24px', borderRadius: '8px', fontWeight: 600,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          animation: 'fade-in-up 0.2s ease-out'
-        }}>
-          {toast.msg}
-        </div>
-      )}
 
       <div className="settings-grid">
         
@@ -239,8 +225,8 @@ const Settings: React.FC = () => {
 
           <div className="settings-field-row">
             <div>
-              <div className="settings-label">Strike Zone Overlay</div>
-              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Show live pitch locations</div>
+              <div className="settings-label">Pitch Tracker</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Show live pitch locations and strike zone</div>
             </div>
             <label className="switch">
               <input type="checkbox" checked={strikeZone} onChange={e => {
@@ -251,7 +237,7 @@ const Settings: React.FC = () => {
           </div>
 
           <div className="settings-field-row">
-            <div className="settings-label">Strike Zone Size</div>
+            <div className="settings-label">Tracker Size</div>
             <select className="settings-input settings-select" style={{width: 'auto'}} value={strikeZoneSize} onChange={e => {
               updateSetting({ strike_zone_size: e.target.value });
             }}>
@@ -259,6 +245,52 @@ const Settings: React.FC = () => {
               <option value="medium">Medium</option>
               <option value="large">Large</option>
             </select>
+          </div>
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Batter Intel Card</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Flash stats when a new batter steps up</div>
+            </div>
+            <label className="switch">
+              <input type="checkbox" checked={batterIntel} onChange={e => {
+                updateSetting({ batter_intel_enabled: e.target.checked });
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Between Innings Overlay</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Show scores, due up, and pitcher stats during breaks</div>
+            </div>
+            <label className="switch">
+              <input type="checkbox" checked={betweenInnings} onChange={e => {
+                updateSetting({ between_innings_enabled: e.target.checked });
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <hr style={{borderTop: '1px solid var(--border-subtle)', margin: '8px 0'}} />
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Overlay Delay</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Seconds to wait before showing overlay updates (sync with TV delay)</div>
+            </div>
+            <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+              <input
+                className="settings-input"
+                type="number"
+                min="0" max="15" step="0.5"
+                value={overlayDelay}
+                onChange={e => updateSetting({ overlay_delay: parseFloat(e.target.value) || 0 })}
+                style={{width: '70px', textAlign: 'center'}}
+              />
+              <span style={{fontSize:'0.8rem', color:'var(--text-tertiary)'}}>sec</span>
+            </div>
           </div>
         </div>
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 
 // ── Type definitions ────────────────────────────────────────────
 
@@ -27,6 +27,7 @@ export interface Game {
 export interface Status {
   now_playing_game_id: string | null;
   youtube_mode: boolean;
+  youtube_video_id: string | null;
   authenticated: boolean;
   browser_running: boolean;
   heartbeat_active: boolean;
@@ -59,6 +60,13 @@ export interface Settings {
   [key: string]: any;
 }
 
+export interface StreamAlert {
+  code: string;
+  message: string;
+  level: 'error' | 'info';
+  id: number;
+}
+
 interface TvAutomatorContextType {
   games: Game[];
   status: Status;
@@ -67,6 +75,9 @@ interface TvAutomatorContextType {
   volume: VolumeState;
   queue: QueueState;
   connected: boolean;
+  alert: StreamAlert | null;
+  clearAlert: () => void;
+  showAlert: (message: string, level?: 'error' | 'info') => void;
   playGame: (gameId: string, feed?: string) => Promise<void>;
   stopPlayback: () => Promise<void>;
   playYoutube: (url: string) => Promise<void>;
@@ -75,11 +86,25 @@ interface TvAutomatorContextType {
   updateSetting: (payload: any) => Promise<void>;
 }
 
+// ── Helpers ─────────────────────────────────────────────────────
+
+/** Shallow-compare two objects — returns true if all top-level values are identical. */
+function shallowEqual(a: Record<string, any>, b: Record<string, any>): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
 // ── Defaults ────────────────────────────────────────────────────
 
 const defaultStatus: Status = {
   now_playing_game_id: null,
   youtube_mode: false,
+  youtube_video_id: null,
   authenticated: false,
   browser_running: false,
   heartbeat_active: false,
@@ -112,9 +137,18 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [volume, setVolume] = useState<VolumeState>(defaultVolume);
   const [queue, setQueue] = useState<QueueState>(defaultQueue);
   const [connected, setConnected] = useState(false);
+  const [alert, setAlert] = useState<StreamAlert | null>(null);
+  const alertIdRef = useRef(0);
+
+  const clearAlert = useCallback(() => setAlert(null), []);
+
+  const showAlert = useCallback((message: string, level: 'error' | 'info' = 'info') => {
+    setAlert({ code: '', message, level, id: ++alertIdRef.current });
+  }, []);
 
   // Track if user is actively changing volume (skip WS updates during drag)
   const volLockRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectedRef = useRef(false);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -167,6 +201,7 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
 
       ws.onopen = () => {
         wsFailCount = 0;
+        connectedRef.current = true;
         setConnected(true);
       };
 
@@ -176,39 +211,68 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
           switch (data.type) {
             case 'status': {
               const { type: _, ...rest } = data;
-              setStatus(prev => ({ ...prev, ...rest }));
+              setStatus(prev => {
+                const merged = { ...prev, ...rest };
+                return shallowEqual(prev, merged) ? prev : merged;
+              });
               break;
             }
             case 'games':
-              if (Array.isArray(data.games)) setGames(data.games);
+              if (Array.isArray(data.games)) {
+                setGames(prev => {
+                  if (prev.length === data.games.length
+                    && JSON.stringify(prev) === JSON.stringify(data.games)) return prev;
+                  return data.games;
+                });
+              }
               break;
             case 'settings': {
               const { type: _, ...rest } = data;
-              setSettings(rest);
+              setSettings(prev => shallowEqual(prev, rest) ? prev : rest);
               break;
             }
             case 'music': {
               const { type: _, ...rest } = data;
-              setMusic(prev => ({ ...prev, ...rest }));
+              setMusic(prev => {
+                const merged = { ...prev, ...rest };
+                return shallowEqual(prev, merged) ? prev : merged;
+              });
               break;
             }
             case 'volume':
               // Skip if user is actively dragging volume slider
               if (!volLockRef.current) {
-                setVolume({ volume: data.volume, muted: data.muted });
+                setVolume(prev => {
+                  if (prev.volume === data.volume && prev.muted === data.muted) return prev;
+                  return { volume: data.volume, muted: data.muted };
+                });
               }
               break;
             case 'queue':
-              setQueue({ songs: data.songs || [], index: data.index ?? -1 });
+              setQueue(prev => {
+                if (prev.index === (data.index ?? -1)
+                  && prev.songs.length === (data.songs?.length ?? 0)) return prev;
+                return { songs: data.songs || [], index: data.index ?? -1 };
+              });
               break;
             case 'autoplay':
               // Handled by views that need it
+              break;
+            case 'error':
+            case 'info':
+              setAlert({
+                code: data.code ?? '',
+                message: data.message ?? '',
+                level: data.type as 'error' | 'info',
+                id: ++alertIdRef.current,
+              });
               break;
           }
         } catch {}
       };
 
       ws.onclose = () => {
+        connectedRef.current = false;
         setConnected(false);
         const delay = Math.min(3000 * Math.pow(1.5, wsFailCount), MAX_RECONNECT_DELAY);
         reconnectTimer = setTimeout(connect, delay);
@@ -222,10 +286,12 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
 
     connect();
 
-    // Very infrequent fallback poll — 60s just to catch any edge cases
+    // Fallback poll — only fires when WebSocket is disconnected
     const fallbackPoll = setInterval(() => {
-      refreshStatus();
-      refreshGames();
+      if (!connectedRef.current) {
+        refreshStatus();
+        refreshGames();
+      }
     }, 60000);
 
     return () => {
@@ -257,11 +323,15 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
     } catch {}
   }, []);
 
+  const value = useMemo(() => ({
+    games, status, settings, music, volume, queue, connected,
+    alert, clearAlert, showAlert,
+    playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting,
+  }), [games, status, settings, music, volume, queue, connected, alert,
+       clearAlert, showAlert, playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting]);
+
   return (
-    <TvAutomatorContext.Provider value={{
-      games, status, settings, music, volume, queue, connected,
-      playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting,
-    }}>
+    <TvAutomatorContext.Provider value={value}>
       {children}
     </TvAutomatorContext.Provider>
   );

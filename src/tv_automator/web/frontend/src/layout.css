@@ -17,6 +17,8 @@
   position: relative;
   z-index: 50;
   transition: width 0.25s ease, min-width 0.25s ease;
+  will-change: width;
+  contain: layout style;
 }
 
 .sidebar--collapsed {
@@ -196,49 +198,6 @@
   min-width: 0;
 }
 
-.top-bar {
-  height: 56px;
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--color-surface);
-  z-index: 40;
-  flex-shrink: 0;
-}
-
-.top-info {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.now-playing-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  border-radius: 4px;
-  background: var(--green-dim);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-  color: var(--green);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.now-playing-pill.youtube {
-  background: var(--red-dim);
-  border-color: rgba(239, 68, 68, 0.2);
-  color: var(--red);
-}
-
-.top-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 .content-area {
   flex: 1;
   padding: 24px;
@@ -255,21 +214,11 @@
   .content-area {
     padding: 16px;
   }
-
-  .top-bar {
-    padding: 0 16px;
-    height: 48px;
-  }
 }
 
 @media (max-width: 600px) {
   .content-area {
     padding: 12px;
-  }
-
-  .top-bar {
-    padding: 0 12px;
-    height: 44px;
   }
 }
 

@@ -252,7 +252,7 @@
     // Start polling only for live games
     if (!isCondensed && szEnabled) {
       szPollTimer = setInterval(pollPitches, 6000);
-      setTimeout(pollPitches, 2000);
+      setTimeout(pollPitches, 500);
     }
     
     connectWs();
@@ -291,9 +291,20 @@
         if (data.type === 'settings' && !isCondensed) {
           handleSettings(data);
         } else if (data.type === 'player_command') {
-          if (data.action === 'quality' && hls) {
+          var cmd = data.command || data.action;
+          if (cmd === 'quality' && hls) {
             var lvl = parseInt(data.level);
             hls.currentLevel = isNaN(lvl) ? -1 : lvl;
+          } else if (cmd === 'captions') {
+            if (hls) {
+              hls.subtitleDisplay = !!data.enabled;
+              hls.subtitleTrack = data.enabled ? 0 : -1;
+            }
+            // Also toggle native text tracks for non-HLS
+            var tracks = video.textTracks;
+            for (var ti = 0; ti < tracks.length; ti++) {
+              tracks[ti].mode = data.enabled ? 'showing' : 'hidden';
+            }
           }
         }
       } catch (err) {}
@@ -331,8 +342,8 @@
       showStatus('HLS not supported', 'error'); return;
     }
     hls = new Hls({
-      maxBufferLength: 30, maxMaxBufferLength: 120,
-      liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6, enableWorker: true,
+      maxBufferLength: 60, maxMaxBufferLength: 600,
+      liveSyncDurationCount: 5, liveMaxLatencyDurationCount: 10, enableWorker: true,
     });
     hls.loadSource(url);
     hls.attachMedia(video);
@@ -340,6 +351,9 @@
     hls.on(Hls.Events.MANIFEST_PARSED, function(_, data) {
       video.play().catch(function(){});
       retries = 0; hideStatus();
+      // Disable subtitles by default
+      hls.subtitleDisplay = false;
+      hls.subtitleTrack = -1;
       if (data.levels && data.levels.length > 0) {
         var levels = data.levels.map(function(l, i) {
           return { index: i, height: l.height || 0, bitrate: l.bitrate || 0 };
@@ -390,10 +404,40 @@
   var szDots = document.getElementById('sz-dots');
   var breakOverlay = document.getElementById('break-overlay');
   var szPollTimer = null;
-  var lastPitchCount = -1;
-  var currentBatterId = null;
+  var lastPitchHash = '';
+  var currentZoneTop = 3.5;
+  var currentZoneBot = 1.5;
   var batterCardTimer = null;
   var breakActive = false;
+  var overlayUpdateTimer = null;
+  var szEverShown = false;  // once shown with valid data, keep visible
+
+  // ── SVG coordinate mapping ────────────────────────
+  // The SVG box runs from y=20 (top) to y=130 (bottom), x=30 to x=110.
+  // Horizontal: pX in feet from plate center. Box edges = plate edges (~-0.83 to 0.83).
+  //   We map the full -1.5..+1.5 range into the viewBox so balls off the plate show outside the box.
+  // Vertical: zone_top/zone_bot from the API (per-batter) map exactly to box top/bottom.
+
+  var BOX_TOP = 20, BOX_BOT = 130, BOX_LEFT = 30, BOX_RIGHT = 110;
+
+  function pxToSvgX(px) {
+    // -1.5 → 10, 0 → 70 (center), +1.5 → 130
+    return 10 + ((px + 1.5) / 3.0) * 120;
+  }
+
+  function pzToSvgY(pz) {
+    var zoneH = currentZoneTop - currentZoneBot;
+    if (zoneH <= 0) zoneH = 1.8; // safety
+    return BOX_TOP + ((currentZoneTop - pz) / zoneH) * (BOX_BOT - BOX_TOP);
+  }
+
+  function pitchColor(call) {
+    var c = (call || '').toLowerCase();
+    if (c.indexOf('in play') >= 0) return '#8fbc6a';
+    if (c.indexOf('strike') >= 0 || c.indexOf('foul') >= 0 || c.indexOf('swinging') >= 0) return '#d4915c';
+    if (c.indexOf('ball') >= 0) return '#5b9bd5';
+    return 'rgba(255,255,255,0.5)';
+  }
 
   function shortName(name) {
     if (!name) return '';
@@ -401,18 +445,45 @@
     return p.length < 2 ? name : p[0][0] + '. ' + p[p.length - 1];
   }
 
-  function pxToSvgX(px) { return 10 + ((px + 1.5) / 3.0) * 120; }
-  function pzToSvgY(pz) { return 150 - ((pz - 0.5) / 4.0) * 140; }
-
-  function pitchColor(call) {
-    call = (call || '').toLowerCase();
-    if (call.indexOf('strike') >= 0 || call.indexOf('foul') >= 0 || call.indexOf('swinging') >= 0) return '#d4915c';
-    if (call.indexOf('ball') >= 0) return '#5b9bd5';
-    if (call.indexOf('in play') >= 0) return '#8fbc6a';
-    return 'rgba(255,255,255,0.5)';
+  // Build a fast hash of the pitch data so we detect ANY change (not just count)
+  function hashPitches(pitches, zt, zb) {
+    var h = pitches.length + '|' + zt + '|' + zb;
+    for (var i = 0; i < pitches.length; i++) {
+      var p = pitches[i];
+      h += '|' + (p.pX || 0).toFixed(2) + ',' + (p.pZ || 0).toFixed(2) + ',' + (p.call || '');
+    }
+    return h;
   }
 
-  // Show batter intel card, then fade back to strike zone
+  // ── Render pitch dots ─────────────────────────────
+  function renderPitches(pitches) {
+    var svg = '';
+    var len = pitches.length;
+    for (var j = 0; j < len; j++) {
+      var p = pitches[j];
+      if (p.pX == null || p.pZ == null) continue;
+      var cx = pxToSvgX(p.pX);
+      var cy = pzToSvgY(p.pZ);
+      // Clamp to visible SVG area with small margin
+      if (cy < -4 || cy > 164 || cx < -4 || cx > 144) continue;
+      var color = pitchColor(p.call);
+      var isLast = j === len - 1;
+      var r = isLast ? 6 : 4.5;
+      var opacity = isLast ? 1 : 0.5 + (j / len) * 0.4;
+      svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" '
+        + 'fill="' + color + '" opacity="' + opacity.toFixed(2) + '"';
+      if (isLast) svg += ' stroke="rgba(255,255,255,0.6)" stroke-width="1.5"';
+      svg += '/>';
+      if (isLast && p.speed_mph) {
+        svg += '<text x="' + cx.toFixed(1) + '" y="' + (cy - 9).toFixed(1) + '" '
+          + 'text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="8" font-weight="600">'
+          + Math.round(p.speed_mph) + '</text>';
+      }
+    }
+    szDots.innerHTML = svg;
+  }
+
+  // ── Batter intel card ─────────────────────────────
   function showBatterCard(bi) {
     if (!bi || isCondensed) return;
     clearTimeout(batterCardTimer);
@@ -431,8 +502,7 @@
     if (t.hr > 0) todayParts.push('<span>' + t.hr + ' HR</span>');
     if (t.bb > 0) todayParts.push('<span>' + t.bb + ' BB</span>');
     document.getElementById('bi-today').innerHTML = todayParts.length
-      ? 'Today: ' + todayParts.join(', ')
-      : 'First AB';
+      ? 'Today: ' + todayParts.join(', ') : 'First AB';
 
     var vsDivider = document.getElementById('bi-vs-divider');
     var vsEl = document.getElementById('bi-vs');
@@ -454,7 +524,7 @@
     }, 8000);
   }
 
-  // Show/hide between-innings break overlay
+  // ── Between-innings break ─────────────────────────
   function updateBreakOverlay(bd) {
     if (!bd || !bd.active) {
       if (breakActive) {
@@ -467,13 +537,11 @@
     breakActive = true;
     szOverlay.classList.remove('visible');
 
-    // Game score header
     var gs = bd.game_score || {};
     document.getElementById('break-score').innerHTML =
       gs.away + ' <span class="sep">' + gs.away_r + ' - ' + gs.home_r + '</span> ' + gs.home;
     document.getElementById('break-inning').textContent = 'Break \u2014 ' + (bd.inning || '');
 
-    // Due up
     var due = bd.due_up || [];
     if (due.length) {
       document.getElementById('break-due-up-section').style.display = '';
@@ -485,7 +553,6 @@
       document.getElementById('break-due-up-section').style.display = 'none';
     }
 
-    // Pitcher summary
     var p = bd.pitcher;
     if (p) {
       document.getElementById('break-pitcher-section').style.display = '';
@@ -502,7 +569,6 @@
       document.getElementById('break-pitcher-section').style.display = 'none';
     }
 
-    // Other scores
     var scores = bd.other_scores || [];
     var liveScores = scores.filter(function(s) { return s.state && s.state.toLowerCase().indexOf('progress') >= 0; });
     var secEl = document.getElementById('break-scores-section');
@@ -522,27 +588,38 @@
     breakOverlay.classList.add('visible');
   }
 
-  var overlayUpdateTimer = null;
-
+  // ── Main overlay update ───────────────────────────
   function applyOverlayData(data) {
-    // Between-innings break
+    // Break overlay
     if (breakOverlayEnabled) updateBreakOverlay(data.break_data);
     else updateBreakOverlay(null);
-    if (breakActive) return;  // don't update strike zone during break
+    if (breakActive) return;
 
     // Batter intel flash
     if (batterIntelEnabled && data.batter_intel && data.batter_intel.is_new) {
       showBatterCard(data.batter_intel);
     }
 
+    // No data yet — hide only if we've never shown the overlay this session.
+    // Once shown, keep it visible through brief data gaps (inning transitions).
     if (!data.pitcher && !data.batter) {
-      szOverlay.classList.remove('visible');
+      if (!szEverShown) szOverlay.classList.remove('visible');
       return;
     }
-    // Only update strike zone when it's visible (not during batter card)
+
+    szEverShown = true;
+
+    // Don't overwrite the batter card while it's showing
     if (biContent.style.display !== 'none') return;
     szOverlay.classList.add('visible');
 
+    // Update zone boundaries
+    if (data.zone_top > 0 && data.zone_bot > 0 && data.zone_top > data.zone_bot) {
+      currentZoneTop = data.zone_top;
+      currentZoneBot = data.zone_bot;
+    }
+
+    // Update header text
     document.getElementById('sz-count').textContent = data.count || '';
     document.getElementById('sz-inning').textContent = data.inning || '';
     var outsText = '';
@@ -551,30 +628,15 @@
     document.getElementById('sz-pitcher').textContent = shortName(data.pitcher);
     document.getElementById('sz-batter').textContent = shortName(data.batter);
 
-    if (data.pitches.length !== lastPitchCount) {
-      lastPitchCount = data.pitches.length;
-      var svg = '';
-      for (var j = 0; j < data.pitches.length; j++) {
-        var p = data.pitches[j];
-        var cx = pxToSvgX(p.pX);
-        var cy = pzToSvgY(p.pZ);
-        var color = pitchColor(p.call);
-        var isLast = j === data.pitches.length - 1;
-        var r = isLast ? 6 : 4.5;
-        var opacity = isLast ? 1 : 0.55 + (j / data.pitches.length) * 0.35;
-        svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r + '" '
-          + 'fill="' + color + '" opacity="' + opacity.toFixed(2) + '" '
-          + 'stroke="' + (isLast ? 'rgba(255,255,255,0.6)' : 'none') + '" stroke-width="' + (isLast ? 1.5 : 0) + '"/>';
-        if (isLast && p.speed_mph) {
-          svg += '<text x="' + cx.toFixed(1) + '" y="' + (cy - 9).toFixed(1) + '" '
-            + 'text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="8" font-weight="600">'
-            + Math.round(p.speed_mph) + '</text>';
-        }
-      }
-      szDots.innerHTML = svg;
+    // Re-render pitches only if something actually changed
+    var h = hashPitches(data.pitches, currentZoneTop, currentZoneBot);
+    if (h !== lastPitchHash) {
+      lastPitchHash = h;
+      renderPitches(data.pitches);
     }
   }
 
+  // ── Polling ───────────────────────────────────────
   async function pollPitches() {
     if (isCondensed || !szEnabled) return;
     try {
@@ -582,9 +644,9 @@
       if (!res.ok) return;
       var data = await res.json();
 
-      // If break is ending (returning to live play), apply immediately — no delay
       var breakEnding = breakActive && (!data.break_data || !data.break_data.active);
-      if (breakEnding || overlayDelayMs <= 0) {
+      // Show immediately on first display, break transitions, or zero delay
+      if (!szEverShown || breakEnding || overlayDelayMs <= 0) {
         clearTimeout(overlayUpdateTimer);
         applyOverlayData(data);
       } else {

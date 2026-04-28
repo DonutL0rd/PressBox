@@ -1,14 +1,11 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Power, Tv } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
-import { useLocation } from 'react-router-dom';
 import './NowPlayingBar.css';
 
-const NowPlayingBar: React.FC = () => {
+const NowPlayingBar: React.FC = React.memo(() => {
   const { status, games, stopPlayback, music, volume } = useTvAutomator();
-  const location = useLocation();
 
-  // Local volume for smooth dragging
   const [localVol, setLocalVol] = useState(volume.volume);
   const [localMuted, setLocalMuted] = useState(volume.muted);
   const volTimeout = useRef<any>(null);
@@ -19,6 +16,12 @@ const NowPlayingBar: React.FC = () => {
       setLocalMuted(volume.muted);
     }
   }, [volume]);
+
+  const isPlayingGame    = !!status.now_playing_game_id;
+  const isPlayingYoutube = status.youtube_mode && !isPlayingGame;
+  const musicSong        = music.song;
+  const isMusicPlaying   = !!(musicSong && music.playing && !isPlayingGame && !isPlayingYoutube);
+  const isAnythingPlaying = isPlayingGame || isPlayingYoutube || isMusicPlaying;
 
   const sendCommand = async (cmd: string) => {
     await fetch('/api/music/command', {
@@ -44,15 +47,7 @@ const NowPlayingBar: React.FC = () => {
     fetch(`/api/volume?mute=${newMuted}`, { method: 'POST' });
   };
 
-  // Don't render on NowPlaying page (it has its own controls)
-  if (location.pathname === '/') return null;
-
-  const isPlayingGame = !!status.now_playing_game_id;
-  const isPlayingYoutube = status.youtube_mode && !isPlayingGame;
-  const musicSong = music.song;
-  const isMusicPlaying = !!(musicSong && music.playing && !isPlayingGame && !isPlayingYoutube);
-
-  if (!isPlayingGame && !isPlayingYoutube && !isMusicPlaying) return null;
+  if (!isAnythingPlaying) return null;
 
   const game = isPlayingGame ? games.find(g => g.game_id === status.now_playing_game_id) : null;
 
@@ -85,7 +80,12 @@ const NowPlayingBar: React.FC = () => {
 
         {isMusicPlaying && (
           <>
-            <img src={`/api/music/cover/${musicSong.albumId || musicSong.id}`} className="npb-art" alt="Album art" onError={(e: any) => { e.target.style.display = 'none'; }} />
+            <img
+              src={`/api/music/cover/${musicSong.albumId || musicSong.id}`}
+              className="npb-art"
+              alt="Album art"
+              onError={(e: any) => { e.target.style.display = 'none'; }}
+            />
             <div className="npb-text">
               <div className="npb-title">{musicSong.title}</div>
               <div className="npb-subtitle">{musicSong.artist}</div>
@@ -105,18 +105,22 @@ const NowPlayingBar: React.FC = () => {
           </>
         )}
         {(isPlayingGame || isPlayingYoutube) && (
-          <button className="btn btn-primary npb-stop-btn" onClick={stopPlayback}><Power size={14} /> Stop</button>
+          <button className="btn btn-primary npb-stop-btn" onClick={() => stopPlayback()}>
+            <Power size={14} /> Stop
+          </button>
         )}
       </div>
 
       <div className="npb-volume">
         <button className="btn-icon" onClick={toggleMute}>
-          {localMuted || localVol === 0 ? <VolumeX size={18} color="var(--text-secondary)" /> : <Volume2 size={18} color="var(--text-secondary)" />}
+          {localMuted || localVol === 0
+            ? <VolumeX size={18} color="var(--text-secondary)" />
+            : <Volume2 size={18} color="var(--text-secondary)" />}
         </button>
         <input type="range" className="volume-slider" min="0" max="100" value={localVol} onChange={handleVolumeChange} />
       </div>
     </div>
   );
-};
+});
 
 export default NowPlayingBar;

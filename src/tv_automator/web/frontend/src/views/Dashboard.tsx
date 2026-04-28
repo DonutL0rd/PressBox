@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTvAutomator, type Game } from '../hooks/useTvAutomator';
-import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity } from 'lucide-react';
+import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity, Layers, Monitor, Subtitles, Power } from 'lucide-react';
 import './Dashboard.css';
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -25,7 +25,7 @@ const GameListItem: React.FC<{
   isSelected: boolean;
   isPlaying: boolean;
   onClick: () => void;
-}> = ({ game, isSelected, isPlaying, onClick }) => {
+}> = React.memo(({ game, isSelected, isPlaying, onClick }) => {
   const isLive = game.status === 'live';
   const hasScore = game.display_score && game.display_score.trim() !== '';
 
@@ -57,7 +57,7 @@ const GameListItem: React.FC<{
       )}
     </div>
   );
-};
+});
 
 // ── Detail panel ─────────────────────────────────────────────
 
@@ -79,6 +79,96 @@ interface GameStats {
   home_batting: any;
 }
 
+// ── Stream controls (shown inline when a game is active) ────
+const StreamControls: React.FC = () => {
+  const { settings, updateSetting } = useTvAutomator();
+  const [levels, setLevels] = useState<any[]>([]);
+  const [ccEnabled, setCcEnabled] = useState(false);
+  const [cec, setCec] = useState<any>({});
+
+  useEffect(() => {
+    fetch('/api/player/levels').then(r => r.ok ? r.json() : { levels: [] }).then(d => setLevels(d.levels || [])).catch(() => {});
+    fetch('/api/cec/status').then(r => r.ok ? r.json() : {}).then(setCec).catch(() => {});
+  }, []);
+
+  const sendCmd = (cmd: any) => fetch('/api/player/command', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd),
+  }).catch(() => {});
+
+  return (
+    <section className="detail-section">
+      <h3 className="detail-section-title"><Layers size={14} /> Stream Controls</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {levels.length > 0 && (
+          <div className="sc-row">
+            <span className="sc-label"><Monitor size={13} /> Quality</span>
+            <select className="sc-select" onChange={e => sendCmd({ command: 'quality', level: parseInt(e.target.value) })}>
+              <option value="-1">Auto</option>
+              {levels.map((l: any, i: number) => (
+                <option key={i} value={i}>{l.height ? `${l.height}p` : `Level ${i}`}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="sc-row">
+          <span className="sc-label"><Subtitles size={13} /> Captions</span>
+          <label className="switch">
+            <input type="checkbox" checked={ccEnabled} onChange={e => { setCcEnabled(e.target.checked); sendCmd({ command: 'captions', enabled: e.target.checked }); }} />
+            <span className="slider"></span>
+          </label>
+        </div>
+        <div className="sc-row">
+          <span className="sc-label">Pitch Tracker</span>
+          <label className="switch">
+            <input type="checkbox" checked={settings.strike_zone_enabled !== false} onChange={e => updateSetting({ strike_zone_enabled: e.target.checked })} />
+            <span className="slider"></span>
+          </label>
+        </div>
+        <div className="sc-row">
+          <span className="sc-label">Batter Intel</span>
+          <label className="switch">
+            <input type="checkbox" checked={settings.batter_intel_enabled !== false} onChange={e => updateSetting({ batter_intel_enabled: e.target.checked })} />
+            <span className="slider"></span>
+          </label>
+        </div>
+        <div className="sc-row">
+          <span className="sc-label">Innings Breaks</span>
+          <label className="switch">
+            <input type="checkbox" checked={settings.between_innings_enabled !== false} onChange={e => updateSetting({ between_innings_enabled: e.target.checked })} />
+            <span className="slider"></span>
+          </label>
+        </div>
+        <div className="sc-row">
+          <span className="sc-label">Overlay Delay</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <input type="number" className="sc-select" min={0} max={15} step={0.5} value={settings.overlay_delay ?? 2}
+              onChange={e => updateSetting({ overlay_delay: parseFloat(e.target.value) || 0 })}
+              style={{ width: '60px', textAlign: 'center' }} />
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>sec</span>
+          </div>
+        </div>
+        <div className="sc-row">
+          <span className="sc-label">Tracker Size</span>
+          <select className="sc-select" value={settings.strike_zone_size || 'medium'} onChange={e => updateSetting({ strike_zone_size: e.target.value })}>
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </div>
+        {cec.available && (
+          <div className="sc-row">
+            <span className="sc-label"><Power size={13} /> TV Power</span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button className="btn" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => fetch('/api/cec/on', { method: 'POST' })}>ON</button>
+              <button className="btn" style={{ padding: '4px 10px', fontSize: '0.78rem' }} onClick={() => fetch('/api/cec/off', { method: 'POST' })}>OFF</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+};
+
 const GameDetailPanel: React.FC<{
   game: Game;
   isPlaying: boolean;
@@ -94,11 +184,16 @@ const GameDetailPanel: React.FC<{
     setError(null);
     setLoading(true);
 
+    let prevJson = '';
     const load = async () => {
       try {
         const r = await fetch(`/api/game/${game.game_id}/stats`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
+        const text = await r.text();
+        // Skip re-render if data is identical to previous fetch
+        if (text === prevJson) return;
+        prevJson = text;
+        const data = JSON.parse(text);
         if (!cancelled) setStats(data);
       } catch (e: any) {
         if (!cancelled) setError(e.message || 'Failed to load stats');
@@ -109,7 +204,7 @@ const GameDetailPanel: React.FC<{
     load();
 
     // Keep the detail panel fresh for live games.
-    const iv = game.status === 'live' ? setInterval(load, 20000) : null;
+    const iv = game.status === 'live' ? setInterval(load, 30000) : null;
     return () => {
       cancelled = true;
       if (iv) clearInterval(iv);
@@ -177,6 +272,9 @@ const GameDetailPanel: React.FC<{
           </div>
         )}
       </div>
+
+      {/* Stream controls — visible when this game is playing */}
+      {isPlaying && <StreamControls />}
 
       {/* Probable pitchers (pre-game) */}
       {(game.extra?.away_probable_pitcher || game.extra?.home_probable_pitcher) && !isLive && (
@@ -373,17 +471,21 @@ const Dashboard: React.FC = () => {
 
   const selectedGame = games.find(g => g.game_id === selectedId) || null;
 
-  const counts = {
+  const counts = useMemo(() => ({
     live: games.filter(g => g.status === 'live').length,
     upcoming: games.filter(g => g.status === 'scheduled' || g.status === 'pre_game').length,
     final: games.filter(g => g.status === 'final').length,
-  };
+  }), [games]);
 
-  const shiftDate = (days: number) => {
-    const d = new Date(date);
-    d.setDate(d.getDate() + days);
-    setDate(d);
-  };
+  const shiftDate = useCallback((days: number) => {
+    setDate(d => {
+      const next = new Date(d);
+      next.setDate(next.getDate() + days);
+      return next;
+    });
+  }, []);
+
+  const selectGame = useCallback((id: string) => setSelectedId(id), []);
 
   return (
     <div className="dash animate-in">
@@ -442,7 +544,7 @@ const Dashboard: React.FC = () => {
               game={g}
               isSelected={g.game_id === selectedId}
               isPlaying={status.now_playing_game_id === g.game_id}
-              onClick={() => setSelectedId(g.game_id)}
+              onClick={() => selectGame(g.game_id)}
             />
           ))}
         </aside>
