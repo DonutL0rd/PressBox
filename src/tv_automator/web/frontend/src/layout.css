@@ -210,15 +210,59 @@
 
 /* ── Responsive ─────────────────────────────────────────── */
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 60px;
+    flex-direction: row;
+    border-right: none;
+    border-top: 1px solid var(--border-subtle);
+    padding: 0;
+  }
+
+  .sidebar-brand, .sidebar-footer, .sidebar-toggle {
+    display: none !important;
+  }
+
+  .nav-menu {
+    flex-direction: row;
+    padding: 0;
+    height: 100%;
+    gap: 0;
+  }
+
+  .nav-item {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 0;
+    border-radius: 0;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .nav-item .nav-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .main-wrap {
+    padding-bottom: 60px; /* space for bottom nav */
+  }
+
   .content-area {
-    padding: 16px;
+    padding: 12px;
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   .content-area {
-    padding: 12px;
+    padding: 16px;
   }
 }
 

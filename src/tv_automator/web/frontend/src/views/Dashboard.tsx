@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTvAutomator, type Game } from '../hooks/useTvAutomator';
-import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity, Layers, Monitor, Subtitles, Power } from 'lucide-react';
+import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity, Layers, Monitor, Subtitles, Power, ArrowLeft } from 'lucide-react';
 import './Dashboard.css';
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -30,12 +30,9 @@ const GameListItem: React.FC<{
   const hasScore = game.display_score && game.display_score.trim() !== '';
 
   return (
-    <div
+    <button
       className={`gli ${isLive ? 'gli--live' : ''} ${isSelected ? 'gli--selected' : ''} ${isPlaying ? 'gli--playing' : ''}`}
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div className="gli-left">
         <div className="gli-teams">
@@ -55,7 +52,7 @@ const GameListItem: React.FC<{
           <span>{game.home_team.score ?? 0}</span>
         </div>
       )}
-    </div>
+    </button>
   );
 });
 
@@ -173,7 +170,8 @@ const GameDetailPanel: React.FC<{
   game: Game;
   isPlaying: boolean;
   onPlay: (gameId: string, feed: string) => void;
-}> = ({ game, isPlaying, onPlay }) => {
+  onBack?: () => void;
+}> = ({ game, isPlaying, onPlay, onBack }) => {
   const [stats, setStats] = useState<GameStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -217,6 +215,11 @@ const GameDetailPanel: React.FC<{
 
   return (
     <div className="detail-panel animate-in" key={game.game_id}>
+      {onBack && (
+        <button className="btn-icon mobile-back" onClick={onBack}>
+          <ArrowLeft size={20} />
+        </button>
+      )}
       {/* Header */}
       <div className="detail-head">
         <div className="detail-head-teams">
@@ -287,7 +290,16 @@ const GameDetailPanel: React.FC<{
         </section>
       )}
 
-      {loading && !stats && <div className="detail-loading">Loading stats…</div>}
+      {loading && !stats && (
+        <div className="detail-loading">
+          <div className="skeleton skeleton-title" />
+          <div className="skeleton skeleton-rect" />
+          <div className="skeleton skeleton-title" style={{ width: '30%' }} />
+          <div className="skeleton skeleton-text" />
+          <div className="skeleton skeleton-text" />
+          <div className="skeleton skeleton-text" />
+        </div>
+      )}
       {error && <div className="detail-error">Could not load stats: {error}</div>}
 
       {stats && (
@@ -424,6 +436,19 @@ const BattingRow: React.FC<{ team: string; s: any }> = ({ team, s }) => (
 const Dashboard: React.FC = () => {
   const { games: todayGames, status, playGame, refreshGames } = useTvAutomator();
 
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      if (!mobile) setMobileView('list');
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [date, setDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0,0,0,0);
@@ -471,11 +496,15 @@ const Dashboard: React.FC = () => {
 
   const selectedGame = games.find(g => g.game_id === selectedId) || null;
 
-  const counts = useMemo(() => ({
-    live: games.filter(g => g.status === 'live').length,
-    upcoming: games.filter(g => g.status === 'scheduled' || g.status === 'pre_game').length,
-    final: games.filter(g => g.status === 'final').length,
-  }), [games]);
+  const counts = useMemo(() => {
+    let live = 0, upcoming = 0, final = 0;
+    for (const g of games) {
+      if (g.status === 'live') live++;
+      else if (g.status === 'scheduled' || g.status === 'pre_game') upcoming++;
+      else if (g.status === 'final') final++;
+    }
+    return { live, upcoming, final };
+  }, [games]);
 
   const shiftDate = useCallback((days: number) => {
     setDate(d => {
@@ -485,10 +514,13 @@ const Dashboard: React.FC = () => {
     });
   }, []);
 
-  const selectGame = useCallback((id: string) => setSelectedId(id), []);
+  const selectGame = useCallback((id: string) => {
+    setSelectedId(id);
+    if (isMobile) setMobileView('detail');
+  }, [isMobile]);
 
   return (
-    <div className="dash animate-in">
+    <div className={`dash animate-in ${isMobile ? 'dash--mobile' : ''} dash--mobile-view-${mobileView}`}>
       {/* Top bar — date + filters */}
       <div className="dash-topbar">
         <div className="dash-date-nav">
@@ -527,7 +559,7 @@ const Dashboard: React.FC = () => {
 
       {/* Main body — two columns */}
       <div className="dash-body">
-        <aside className="dash-list">
+        <aside className="dash-list" style={{ display: isMobile && mobileView !== 'list' ? 'none' : undefined }}>
           {loading && <div className="dash-empty">Loading games…</div>}
           {!loading && filteredGames.length === 0 && (
             <div className="dash-empty">
@@ -549,12 +581,13 @@ const Dashboard: React.FC = () => {
           ))}
         </aside>
 
-        <section className="dash-detail">
+        <section className="dash-detail" style={{ display: isMobile && mobileView !== 'detail' ? 'none' : undefined }}>
           {selectedGame ? (
             <GameDetailPanel
               game={selectedGame}
               isPlaying={status.now_playing_game_id === selectedGame.game_id}
               onPlay={playGame}
+              onBack={isMobile ? () => setMobileView('list') : undefined}
             />
           ) : (
             <div className="dash-empty dash-empty--lg">

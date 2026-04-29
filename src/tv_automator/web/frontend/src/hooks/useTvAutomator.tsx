@@ -302,16 +302,31 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const playGame = useCallback(async (gameId: string, feed: string = 'HOME') => {
+    // Optimistic update
+    setStatus(prev => ({ ...prev, now_playing_game_id: gameId, youtube_mode: false }));
     try {
-      await fetch(`/api/play/${gameId}?feed=${feed}`, { method: 'POST' });
-    } catch {}
-  }, []);
+      const r = await fetch(`/api/play/${gameId}?feed=${feed}`, { method: 'POST' });
+      if (!r.ok) {
+        // Revert on failure
+        refreshStatus();
+      }
+    } catch {
+      refreshStatus();
+    }
+  }, [refreshStatus]);
 
   const stopPlayback = useCallback(async () => {
+    // Optimistic update
+    setStatus(prev => ({ ...prev, now_playing_game_id: null, youtube_mode: false, youtube_video_id: null }));
     try {
-      await fetch('/api/stop', { method: 'POST' });
-    } catch {}
-  }, []);
+      const r = await fetch('/api/stop', { method: 'POST' });
+      if (!r.ok) {
+        refreshStatus();
+      }
+    } catch {
+      refreshStatus();
+    }
+  }, [refreshStatus]);
 
   const playYoutube = useCallback(async (url: string) => {
     try {

@@ -129,12 +129,16 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 100%;
+  text-align: left;
   padding: 12px 14px;
   border-radius: 6px;
   background: var(--color-surface);
   border: 1px solid var(--border-subtle);
   cursor: pointer;
   transition: all var(--trans-fast);
+  color: inherit;
+  font-family: inherit;
 }
 
 .gli:hover {
@@ -206,6 +210,16 @@
   overflow-y: auto;
   background: var(--color-surface);
   border: 1px solid var(--border-subtle);
+  min-height: 600px; /* Prevent collapse when switching games */
+  contain: layout;
+  position: relative;
+}
+
+.mobile-back {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
 }
 
 .detail-head {
@@ -464,7 +478,24 @@
   min-width: 44px;
 }
 
-.detail-loading,
+.detail-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-top: 10px;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-surface-hover) 25%, var(--color-surface-raised) 50%, var(--color-surface-hover) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+}
+
+.skeleton-text { height: 1rem; width: 100%; }
+.skeleton-title { height: 1.5rem; width: 40%; margin-bottom: 12px; }
+.skeleton-rect { height: 120px; width: 100%; }
+
 .detail-error {
   text-align: center;
   padding: 32px;
@@ -505,4 +536,58 @@
 .sc-select option {
   background: var(--color-surface);
   color: var(--text-primary);
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .dash-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .dash-body {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-date-nav {
+    justify-content: center;
+  }
+
+  .dash-filters {
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .filter-pill {
+    flex-shrink: 0;
+  }
+
+  .detail-panel {
+    padding: 16px;
+    min-height: auto;
+  }
+
+  .detail-team-abbr {
+    font-size: 1.8rem;
+  }
+
+  .detail-team-score {
+    font-size: 2.2rem;
+  }
+
+  .detail-head {
+    padding-top: 32px;
+  }
+
+  .pitcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash--mobile-view-detail .dash-topbar,
+  .dash--mobile-view-detail .auth-warn {
+    display: none;
+  }
 }
