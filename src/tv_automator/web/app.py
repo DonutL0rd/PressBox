@@ -1728,7 +1728,7 @@ async def get_settings():
         "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
         # Screensaver
         "screensaver_music_size": _config.get("screensaver", {}).get("music_size", "medium"),
-        "dvd_bounce": _config.get("screensaver", {}).get("dvd_bounce", False),
+        "screensaver_schedule_scale": _config.get("screensaver", {}).get("schedule_scale", 100),
         # Navidrome
         "navidrome_server_url": os.getenv("NAVIDROME_URL") or _config.get("navidrome", {}).get("server_url", ""),
         "navidrome_username": os.getenv("NAVIDROME_USERNAME") or _config.get("navidrome", {}).get("username", ""),
@@ -1814,8 +1814,9 @@ async def update_settings(body: dict):
         allowed = ("small", "medium", "large")
         sz = body["screensaver_music_size"] if body["screensaver_music_size"] in allowed else "medium"
         _config.update_nested("screensaver", "music_size", value=sz)
-    if "dvd_bounce" in body:
-        _config.update_nested("screensaver", "dvd_bounce", value=bool(body["dvd_bounce"]))
+    if "screensaver_schedule_scale" in body:
+        val = max(50, min(200, int(body["screensaver_schedule_scale"])))
+        _config.update_nested("screensaver", "schedule_scale", value=val)
     _config.save_user_config()
     log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
     await _broadcast_settings()
