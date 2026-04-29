@@ -1,5 +1,32 @@
 # Changelog
 
+All notable changes are documented here.
+
+---
+
+## [0.4.0] - 2026-04-27
+
+### Added
+- **Global Alerts** — New `AlertBanner` component and `showAlert` hook to surface WebSocket-driven error and info messages.
+- **Inline Stream Controls** — Added dedicated playback and overlay controls directly within the MLB Dashboard when a game is playing.
+- **Inline Music & YouTube Controls** — Added dedicated transport controls (play/pause, seek, speed, captions) within the Music and YouTube views.
+- **DVD Bounce Screensaver** — Added a toggle in Settings to enable a DVD-style bouncing animation for the screensaver.
+
+### Changed
+- **Design System Update** — Overhauled color palette, refined typography, and standardized component styling across the React frontend.
+- **WebSocket State Management** — Replaced frequent REST polling with a persistent WebSocket connection that broadcasts `status`, `games`, `settings`, `music`, `volume`, `queue`, and `autoplay` state updates.
+- **HLS Performance** — Tuned HLS.js buffers (`maxBufferLength: 60`, `maxMaxBufferLength: 600`) and live sync settings for improved playback stability.
+- **Browser Hardware Acceleration** — Added Chrome flags (`--enable-gpu-rasterization`, `--enable-zero-copy`, `--enable-features=VaapiVideoDecoder`) to prefer GPU decode and reduce CPU pressure.
+- **Pitch Tracker** — Refactored pitch tracker to use proper SVG coordinate mapping and reduce unnecessary DOM updates.
+
+### Fixed
+- **Stream Reconnection** — Implemented a 3-retry mechanism with 30-second delays for stream reconnects, with fallback to condensed games.
+
+### Removed
+- `src/tv_automator/web/frontend/src/views/NowPlaying.tsx` — Dedicated view removed; controls are now inline within respective views.
+- `src/tv_automator/web/frontend/src/components/TopBar.tsx` — Removed in favor of integrated sidebar status and global alert banner.
+- `src/tv_automator/web/frontend/src/assets/hero.png` — Unused asset removed.
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
