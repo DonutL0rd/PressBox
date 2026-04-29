@@ -81,7 +81,7 @@ _ws_clients: set[WebSocket] = set()
 _last_games_hash: str = ""
 
 # ── Batter intel / between-innings caches ────────────────────────
-_last_batter_id: int | None = None
+_last_batter_id_by_game: dict[str, int | None] = {}
 _batter_vs_pitcher_cache: dict[tuple[int, int], dict | None] = {}
 _other_scores_cache: list[dict] = []
 _other_scores_cache_time: float = 0
@@ -1174,17 +1174,38 @@ def _get_http_client() -> httpx.AsyncClient:
 @app.get("/api/pitches")
 async def get_pitches(game_id: str | None = None):
     """Return pitch data, batter intel, and between-innings break data."""
-    global _last_batter_id
+    global _last_batter_id_by_game
 
-    empty = {"pitches": [], "batter": "", "pitcher": "", "count": "", "outs": 0,
-             "inning": "", "batter_intel": None, "break_data": None}
+    empty = {
+        "game_id": None,
+        "pitches": [],
+        "batter": "",
+        "pitcher": "",
+        "count": "",
+        "balls": 0,
+        "strikes": 0,
+        "outs": 0,
+        "inning": "",
+        "inning_state": "",
+        "runners": {"first": False, "second": False, "third": False},
+        "score": {},
+        "linescore": [],
+        "zone_top": 0,
+        "zone_bot": 0,
+        "batter_intel": None,
+        "break_data": None,
+    }
 
-    target_id = game_id or _now_playing_game_id
+    explicit_game_id = game_id is not None
+    target_id = game_id if explicit_game_id else _now_playing_game_id
     if not target_id:
-        # Fallback: pick the first live game from the scheduler
-        live_games = [g for g in _scheduler.get_games_for_provider("mlb") if g.status == GameStatus.LIVE]
-        if live_games:
-            target_id = live_games[0].game_id
+        if explicit_game_id:
+            # Explicit callers (e.g. screensaver) may opt into scheduler fallback.
+            live_games = [g for g in _scheduler.get_games_for_provider("mlb") if g.status == GameStatus.LIVE]
+            if live_games:
+                target_id = live_games[0].game_id
+            else:
+                return empty
         else:
             return empty
 
@@ -1253,8 +1274,8 @@ async def get_pitches(game_id: str | None = None):
         # ── Batter intel ────────────────────────────────
         batter_intel = None
         if batter_id:
-            is_new = batter_id != _last_batter_id
-            _last_batter_id = batter_id
+            is_new = batter_id != _last_batter_id_by_game.get(target_id)
+            _last_batter_id_by_game[target_id] = batter_id
 
             # Determine batter's team
             bat_team = "away" if inning_half == "Top" else "home"

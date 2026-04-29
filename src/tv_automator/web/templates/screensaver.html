@@ -360,6 +360,8 @@
     cycleTimer: null
   };
 
+  let pendingArtTimeout = null;
+
   const CYCLE_MS = 8000;
 
   const UI = {
@@ -385,11 +387,15 @@
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === 'music') {
-        handleMusicUpdate(data);
-      } else if (data.type === 'settings') {
-        applySettings(data);
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'music') {
+          handleMusicUpdate(data);
+        } else if (data.type === 'settings') {
+          applySettings(data);
+        }
+      } catch (error) {
+        console.warn('Ignoring malformed WebSocket message', error);
       }
     };
 
@@ -404,7 +410,11 @@
       if (!state.music.song || state.music.song.id !== song.id) {
         const artUrl = `/api/music/cover/${song.albumId || song.id}?size=600`;
         UI.albumArt.style.opacity = 0;
-        setTimeout(() => {
+        if (pendingArtTimeout !== null) {
+          clearTimeout(pendingArtTimeout);
+        }
+        pendingArtTimeout = setTimeout(() => {
+          pendingArtTimeout = null;
           UI.albumArt.src = artUrl;
           UI.albumGlow.src = artUrl;
           UI.trackTitle.textContent = song.title;
@@ -439,6 +449,22 @@
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
+  function makeTeamRow(team, score) {
+    const row = document.createElement('div');
+    row.className = 'team-row';
+    const abbr = document.createElement('div');
+    abbr.className = 'team-abbr';
+    abbr.textContent = team.abbreviation;
+    row.appendChild(abbr);
+    if (score != null) {
+      const scoreEl = document.createElement('div');
+      scoreEl.className = 'team-score';
+      scoreEl.textContent = score;
+      row.appendChild(scoreEl);
+    }
+    return row;
+  }
+
   function buildGameCard(game) {
     const card = document.createElement('div');
     card.className = 'game-card';
@@ -464,41 +490,45 @@
       statusText = 'Postponed';
     }
 
-    const awayScore = showScore ? `<div class="team-score">${game.away_team.score}</div>` : '';
-    const homeScore = showScore ? `<div class="team-score">${game.home_team.score}</div>` : '';
+    // Scoreboard
+    const scoreboard = document.createElement('div');
+    scoreboard.className = 'game-scoreboard';
 
-    let detailParts = [];
+    scoreboard.appendChild(makeTeamRow(game.away_team, showScore ? game.away_team.score : null));
+    const divider = document.createElement('div');
+    divider.className = 'game-divider';
+    scoreboard.appendChild(divider);
+    scoreboard.appendChild(makeTeamRow(game.home_team, showScore ? game.home_team.score : null));
+    card.appendChild(scoreboard);
+
+    // Status
+    const statusEl = document.createElement('div');
+    statusEl.className = `game-status ${statusClass}`;
+    statusEl.textContent = statusText;
+    card.appendChild(statusEl);
+
+    // Detail (venue / broadcast)
+    const detailParts = [];
     if (game.venue) detailParts.push(game.venue);
     if (game.extra?.national_broadcasts) detailParts.push(game.extra.national_broadcasts);
-    const detailHtml = detailParts.length
-      ? `<div class="game-detail">${detailParts.join(' \u2022 ')}</div>`
-      : '';
+    if (detailParts.length) {
+      const detail = document.createElement('div');
+      detail.className = 'game-detail';
+      detail.textContent = detailParts.join(' \u2022 ');
+      card.appendChild(detail);
+    }
 
-    let pitcherHtml = '';
+    // Probable pitchers (pre-game only)
     if (!isLive && !isFinal) {
       const awayP = game.extra?.away_probable_pitcher;
       const homeP = game.extra?.home_probable_pitcher;
       if (awayP && homeP) {
-        pitcherHtml = `<div class="game-detail">${awayP} vs ${homeP}</div>`;
+        const pitcherEl = document.createElement('div');
+        pitcherEl.className = 'game-detail';
+        pitcherEl.textContent = `${awayP} vs ${homeP}`;
+        card.appendChild(pitcherEl);
       }
     }
-
-    card.innerHTML = `
-      <div class="game-scoreboard">
-        <div class="team-row">
-          <div class="team-abbr">${game.away_team.abbreviation}</div>
-          ${awayScore}
-        </div>
-        <div class="game-divider"></div>
-        <div class="team-row">
-          <div class="team-abbr">${game.home_team.abbreviation}</div>
-          ${homeScore}
-        </div>
-      </div>
-      <div class="game-status ${statusClass}">${statusText}</div>
-      ${detailHtml}
-      ${pitcherHtml}
-    `;
 
     return card;
   }
