@@ -14,7 +14,6 @@
     --text-secondary: #a0a0a0;
     --text-muted: #404040;
     --accent: #1a9a8a;
-    --live-red: #e74c3c;
     --transition-lazy: all 2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
@@ -65,11 +64,6 @@
     align-items: center;
     justify-content: center;
     padding: 100px;
-    transition: padding 2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  body.has-music .stage {
-    padding: 60px 80px;
   }
 
   /* Audio Side */
@@ -90,7 +84,7 @@
     opacity: 1;
     transform: translateX(0);
     max-width: 600px;
-    margin-right: 60px;
+    margin-right: 100px;
   }
 
   #album-art {
@@ -121,191 +115,171 @@
     font-weight: 400;
   }
 
-  /* Schedule Section */
-  .schedule-wrap {
+  /* MLB Dashboard (Shared) */
+  .mlb-dashboard {
     flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     text-align: center;
     transition: var(--transition-lazy);
-    max-width: 900px;
-    transform-origin: center center;
   }
 
-  body.has-music .schedule-wrap {
-    margin-left: 0;
-    align-items: center;
-    text-align: center;
-    flex: 1.5;
+  body.has-music .mlb-dashboard { margin-left: 50px;
+    align-items: flex-end;
+    text-align: right;
   }
 
-  .schedule-header {
-    font-size: 1.2rem;
+  /* Components */
+  .diamond {
+    position: relative;
+    width: 140px; height: 140px;
+    margin-bottom: 50px;
+    transform: rotate(45deg);
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .diamond {
+    width: 120px; height: 120px;
+    margin-bottom: 30px;
+  }
+
+  .base {
+    position: absolute;
+    width: 38px; height: 38px;
+    border: 2px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.02);
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .base {
+    width: 28px; height: 28px;
+  }
+
+  .base.active {
+    background: var(--text-primary);
+    border-color: var(--text-primary);
+    box-shadow: 0 0 30px rgba(255,255,255,0.3);
+  }
+
+  .base-1 { top: 0; right: 0; }
+  .base-2 { top: 0; left: 0; }
+  .base-3 { bottom: 0; left: 0; }
+  .home-plate {
+    bottom: 4px; right: 4px;
+    width: 30px; height: 30px;
+    border-color: rgba(255,255,255,0.05);
+  }
+  body.has-music .home-plate { width: 22px; height: 22px; }
+
+  .mlb-info {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    transition: var(--transition-lazy);
+  }
+
+  .inning-text {
+    font-size: 1.6rem;
     font-weight: 500;
     color: var(--accent);
     text-transform: uppercase;
-    letter-spacing: 0.2em;
-    margin-bottom: 50px;
-    transition: var(--transition-lazy);
+    letter-spacing: 0.15em;
   }
 
-  body.has-music .schedule-header {
-    margin-bottom: 40px;
-    font-size: 1.1rem;
-  }
-
-  /* Game Card Carousel */
-  .game-carousel {
-    position: relative;
-    width: 100%;
-    min-height: 320px;
-  }
-
-  .game-card {
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    opacity: 0;
-    transform: translateY(20px);
-    transition: opacity 1.2s ease, transform 1.2s ease;
-    pointer-events: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  body.has-music .game-card {
-    align-items: center;
-  }
-
-  .game-card.active {
-    opacity: 1;
-    transform: translateY(0);
-    pointer-events: auto;
-  }
-
-  .game-scoreboard {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 24px;
-  }
-
-  .team-row {
-    display: flex;
-    align-items: baseline;
-    gap: 24px;
-  }
-
-  .team-abbr {
-    font-size: 4rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    min-width: 180px;
-    transition: var(--transition-lazy);
-  }
-
-  body.has-music .team-abbr {
-    font-size: 3.5rem;
-    min-width: 150px;
-  }
-
-  .team-score {
-    font-size: 4rem;
+  .count-text {
+    font-size: 5rem;
     font-weight: 200;
+    letter-spacing: -3px;
     line-height: 1;
     color: var(--text-primary);
-    min-width: 60px;
     transition: var(--transition-lazy);
   }
 
-  body.has-music .team-score {
+  body.has-music .count-text {
     font-size: 3.5rem;
   }
 
-  .team-name {
-    font-size: 0.85rem;
-    color: var(--text-muted);
+  .matchup-text {
+    font-size: 2rem;
     font-weight: 400;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    margin-left: 4px;
+    color: var(--text-secondary);
+    transition: var(--transition-lazy);
+    margin-top: 10px;
   }
 
-  body.has-music .team-name {
-    font-size: 0.75rem;
+  body.has-music .matchup-text {
+    font-size: 1.4rem;
+    margin-top: 5px;
   }
 
-  .game-divider {
-    width: 60px;
-    height: 1px;
-    background: var(--text-muted);
-    opacity: 0.3;
-    margin: 4px 0;
+  .matchup-text span {
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    margin: 0 12px;
   }
 
-  .game-status {
-    font-size: 1.3rem;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    margin-bottom: 12px;
+  /* Deep Dive Extras (Hidden in Music State) */
+  .deep-extras {
+    margin-top: 60px;
+    width: 100%;
+    max-width: 800px;
+    opacity: 1;
+    transform: translateY(0);
+    transition: var(--transition-lazy);
   }
 
-  .game-status.live {
-    color: var(--live-red);
+  body.has-music .deep-extras {
+    opacity: 0;
+    transform: translateY(40px);
+    pointer-events: none;
+    max-height: 0;
+    margin: 0;
   }
 
-  .game-status.final {
+  .pitch-history {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 50px;
+  }
+
+  .pitch-pill {
+    padding: 10px 20px;
+    border-radius: 30px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 1rem;
     color: var(--text-secondary);
   }
 
-  .game-status.scheduled {
+  .linescore-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1.3rem;
+  }
+
+  .linescore-table th, .linescore-table td {
+    padding: 16px;
+    text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .linescore-table .team-abbr {
+    text-align: left;
+    font-weight: 700;
+    color: var(--text-primary);
+    width: 80px;
+  }
+
+  .linescore-table .total {
+    font-weight: 700;
     color: var(--accent);
+    width: 60px;
   }
 
-  .game-detail {
-    font-size: 1rem;
+  .linescore-table .muted {
     color: var(--text-muted);
-    font-weight: 400;
-    margin-top: 4px;
-  }
-
-  /* Pips */
-  .schedule-pips {
-    display: flex;
-    gap: 8px;
-    margin-top: 50px;
-    transition: var(--transition-lazy);
-  }
-
-  body.has-music .schedule-pips {
-    margin-top: 30px;
-  }
-
-  .pip {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--text-muted);
-    transition: background 0.6s ease, transform 0.6s ease;
-  }
-
-  .pip.active {
-    background: var(--accent);
-    transform: scale(1.5);
-  }
-
-  .pip.live {
-    background: var(--live-red);
-  }
-
-  /* No games state */
-  .no-games {
-    font-size: 2rem;
-    font-weight: 200;
-    color: var(--text-muted);
-    letter-spacing: -0.5px;
   }
 
   /* Clock */
@@ -344,10 +318,30 @@
     </div>
   </div>
 
-  <div class="schedule-wrap">
-    <div class="schedule-header" id="schedule-header"></div>
-    <div class="game-carousel" id="game-carousel"></div>
-    <div class="schedule-pips" id="schedule-pips"></div>
+  <div class="mlb-dashboard">
+    <div class="diamond">
+      <div class="base base-1" id="base-1"></div>
+      <div class="base base-2" id="base-2"></div>
+      <div class="base base-3" id="base-3"></div>
+      <div class="base home-plate"></div>
+    </div>
+
+    <div class="mlb-info">
+      <div class="inning-text" id="inning"></div>
+      <div class="count-text" id="count"></div>
+      <div class="matchup-text" id="matchup"></div>
+    </div>
+
+    <div class="deep-extras">
+      <div class="pitch-history" id="pitch-history">
+        <!-- Last 3-5 pitches -->
+      </div>
+
+      <table class="linescore-table">
+        <thead id="ls-head"></thead>
+        <tbody id="ls-body"></tbody>
+      </table>
+    </div>
   </div>
 
 </div>
@@ -355,12 +349,8 @@
 <script>
   let state = {
     music: { playing: false, song: null },
-    games: [],
-    currentIndex: 0,
-    cycleTimer: null
+    mlb: { game_id: null, data: null }
   };
-
-  const CYCLE_MS = 8000;
 
   const UI = {
     body: document.body,
@@ -369,10 +359,14 @@
     albumGlow: document.getElementById('album-glow'),
     trackTitle: document.getElementById('track-title'),
     trackArtist: document.getElementById('track-artist'),
-    header: document.getElementById('schedule-header'),
-    carousel: document.getElementById('game-carousel'),
-    pips: document.getElementById('schedule-pips'),
-    scheduleWrap: document.querySelector('.schedule-wrap')
+    pitches: document.getElementById('pitch-history'),
+    lsHead: document.getElementById('ls-head'),
+    lsBody: document.getElementById('ls-body'),
+
+    bases: [document.getElementById('base-1'), document.getElementById('base-2'), document.getElementById('base-3')],
+    inning: document.getElementById('inning'),
+    count: document.getElementById('count'),
+    matchup: document.getElementById('matchup')
   };
 
   function updateClock() {
@@ -380,16 +374,20 @@
     UI.clock.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
+  let musicUpdateTimeout = null;
+
   function connectWs() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
     ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === 'music') {
-        handleMusicUpdate(data);
-      } else if (data.type === 'settings') {
-        applySettings(data);
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'music') {
+          handleMusicUpdate(data);
+        }
+      } catch (err) {
+        console.warn('Ignoring invalid WebSocket frame', err);
       }
     };
 
@@ -403,13 +401,18 @@
     if (isPlaying && song) {
       if (!state.music.song || state.music.song.id !== song.id) {
         const artUrl = `/api/music/cover/${song.albumId || song.id}?size=600`;
+
+        if (musicUpdateTimeout) clearTimeout(musicUpdateTimeout);
+
+        // Subtle crossfade for art
         UI.albumArt.style.opacity = 0;
-        setTimeout(() => {
+        musicUpdateTimeout = setTimeout(() => {
           UI.albumArt.src = artUrl;
           UI.albumGlow.src = artUrl;
           UI.trackTitle.textContent = song.title;
           UI.trackArtist.textContent = song.artist;
           UI.albumArt.style.opacity = 1;
+          musicUpdateTimeout = null;
         }, 500);
       }
       state.music.playing = true;
@@ -421,159 +424,128 @@
     }
   }
 
-  function applySettings(data) {
-    const scale = (data.screensaver_schedule_scale || 100) / 100;
-    UI.scheduleWrap.style.transform = `scale(${scale})`;
-  }
-
-  async function loadSettings() {
+  async function pollMLB() {
     try {
-      const resp = await fetch('/api/settings');
-      const data = await resp.json();
-      applySettings(data);
-    } catch (e) {}
-  }
-
-  function formatGameTime(isoString) {
-    const d = new Date(isoString);
-    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  }
-
-  function buildGameCard(game) {
-    const card = document.createElement('div');
-    card.className = 'game-card';
-
-    const isLive = game.status === 'live';
-    const isFinal = game.status === 'final';
-    const showScore = (isLive || isFinal) && game.away_team.score != null && game.home_team.score != null;
-
-    let statusClass = 'scheduled';
-    let statusText = formatGameTime(game.start_time);
-    if (isLive) {
-      statusClass = 'live';
-      const inning = game.extra?.current_inning;
-      const inningState = game.extra?.inning_state;
-      statusText = inning ? `Live \u2022 ${inningState || ''} ${inning}` : 'Live';
-    } else if (isFinal) {
-      statusClass = 'final';
-      statusText = 'Final';
-    } else if (game.status === 'pre_game') {
-      statusText = formatGameTime(game.start_time) + ' \u2022 Pre-Game';
-    } else if (game.status === 'postponed') {
-      statusClass = 'final';
-      statusText = 'Postponed';
-    }
-
-    const awayScore = showScore ? `<div class="team-score">${game.away_team.score}</div>` : '';
-    const homeScore = showScore ? `<div class="team-score">${game.home_team.score}</div>` : '';
-
-    let detailParts = [];
-    if (game.venue) detailParts.push(game.venue);
-    if (game.extra?.national_broadcasts) detailParts.push(game.extra.national_broadcasts);
-    const detailHtml = detailParts.length
-      ? `<div class="game-detail">${detailParts.join(' \u2022 ')}</div>`
-      : '';
-
-    let pitcherHtml = '';
-    if (!isLive && !isFinal) {
-      const awayP = game.extra?.away_probable_pitcher;
-      const homeP = game.extra?.home_probable_pitcher;
-      if (awayP && homeP) {
-        pitcherHtml = `<div class="game-detail">${awayP} vs ${homeP}</div>`;
-      }
-    }
-
-    card.innerHTML = `
-      <div class="game-scoreboard">
-        <div class="team-row">
-          <div class="team-abbr">${game.away_team.abbreviation}</div>
-          ${awayScore}
-        </div>
-        <div class="game-divider"></div>
-        <div class="team-row">
-          <div class="team-abbr">${game.home_team.abbreviation}</div>
-          ${homeScore}
-        </div>
-      </div>
-      <div class="game-status ${statusClass}">${statusText}</div>
-      ${detailHtml}
-      ${pitcherHtml}
-    `;
-
-    return card;
-  }
-
-  function renderSchedule(games) {
-    state.games = games;
-    UI.carousel.innerHTML = '';
-    UI.pips.innerHTML = '';
-
-    if (games.length === 0) {
-      UI.carousel.innerHTML = '<div class="no-games">No games today</div>';
-      UI.header.textContent = "MLB Schedule";
-      return;
-    }
-
-    const now = new Date();
-    const dateStr = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-    UI.header.textContent = dateStr + ' \u2022 ' + games.length + ' Game' + (games.length !== 1 ? 's' : '');
-
-    games.forEach((game, i) => {
-      const card = buildGameCard(game);
-      if (i === state.currentIndex) card.classList.add('active');
-      UI.carousel.appendChild(card);
-
-      const pip = document.createElement('div');
-      pip.className = 'pip';
-      if (i === state.currentIndex) pip.classList.add('active');
-      if (game.status === 'live') pip.classList.add('live');
-      UI.pips.appendChild(pip);
-    });
-
-    startCycle();
-  }
-
-  function showGame(index) {
-    const cards = UI.carousel.querySelectorAll('.game-card');
-    const pips = UI.pips.querySelectorAll('.pip');
-
-    cards.forEach((c, i) => c.classList.toggle('active', i === index));
-    pips.forEach((p, i) => p.classList.toggle('active', i === index));
-
-    state.currentIndex = index;
-  }
-
-  function startCycle() {
-    if (state.cycleTimer) clearInterval(state.cycleTimer);
-    if (state.games.length <= 1) return;
-
-    state.cycleTimer = setInterval(() => {
-      const next = (state.currentIndex + 1) % state.games.length;
-      showGame(next);
-    }, CYCLE_MS);
-  }
-
-  async function pollGames() {
-    try {
-      const resp = await fetch('/api/games');
-      const games = await resp.json();
-      if (Array.isArray(games)) {
-        // Clamp index if game list shrunk
-        if (state.currentIndex >= games.length) state.currentIndex = 0;
-        renderSchedule(games);
+      const resp = await fetch('/api/pitches');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.game_id) {
+          updateMLBUI(data);
+        } else {
+          clearMLBUI();
+        }
       }
     } catch (e) {
-      console.error("Schedule poll failed", e);
+      console.error("MLB poll failed", e);
     }
-    setTimeout(pollGames, 60000);
+    setTimeout(pollMLB, 3000);
+  }
+
+  function clearMLBUI() {
+    UI.bases.forEach(b => b.classList.remove('active'));
+    UI.inning.textContent = "";
+    UI.count.textContent = "";
+    UI.matchup.replaceChildren();
+    UI.pitches.innerHTML = "";
+    UI.lsHead.innerHTML = "";
+    UI.lsBody.innerHTML = "";
+  }
+
+  function updateMLBUI(data) {
+    const { runners, count, inning, pitcher, batter, pitches, linescore, score } = data;
+
+    // Update bases
+    UI.bases[0].classList.toggle('active', !!runners.first);
+    UI.bases[1].classList.toggle('active', !!runners.second);
+    UI.bases[2].classList.toggle('active', !!runners.third);
+
+    // Update text fields
+    UI.inning.textContent = inning;
+    UI.count.textContent = count;
+
+    // XSS safe matchup update
+    UI.matchup.replaceChildren();
+    UI.matchup.appendChild(document.createTextNode(`${pitcher} `));
+    const vs = document.createElement('span');
+    vs.textContent = 'VS';
+    UI.matchup.appendChild(vs);
+    UI.matchup.appendChild(document.createTextNode(` ${batter}`));
+
+    // Update expanded pitches (only used in Deep Dive)
+    UI.pitches.replaceChildren();
+    if (pitches && pitches.length > 0) {
+      const lastPitches = pitches.slice(-5).reverse();
+      lastPitches.forEach(p => {
+        const pill = document.createElement('div');
+        pill.className = 'pitch-pill';
+        pill.textContent = `${p.pitchType} - ${p.speed_mph}mph - ${p.call}`;
+        UI.pitches.appendChild(pill);
+      });
+    }
+
+    // Update linescore
+    if (linescore && linescore.length > 0) {
+      const inningsCount = Math.max(9, linescore.length);
+
+      // Header
+      const headTr = document.createElement('tr');
+      const emptyTh = document.createElement('th');
+      emptyTh.className = 'team-abbr';
+      headTr.appendChild(emptyTh);
+
+      for(let i=1; i<=inningsCount; i++) {
+        const th = document.createElement('th');
+        th.className = 'muted';
+        th.textContent = i;
+        headTr.appendChild(th);
+      }
+      const totalTh = document.createElement('th');
+      totalTh.className = 'total';
+      totalTh.textContent = 'R';
+      headTr.appendChild(totalTh);
+      UI.lsHead.replaceChildren(headTr);
+
+      // Rows
+      const createRow = (abbr, teamScore, key) => {
+        const tr = document.createElement('tr');
+        const tdAbbr = document.createElement('td');
+        tdAbbr.className = 'team-abbr';
+        tdAbbr.textContent = abbr;
+        tr.appendChild(tdAbbr);
+
+        for(let i=0; i<inningsCount; i++) {
+          const td = document.createElement('td');
+          const inn = linescore[i] || {};
+          const val = inn[key];
+          if (val === undefined || val === null) {
+            td.className = 'muted';
+          } else {
+            td.textContent = val;
+          }
+          tr.appendChild(td);
+        }
+        const tdTotal = document.createElement('td');
+        tdTotal.className = 'total';
+        tdTotal.textContent = teamScore;
+        tr.appendChild(tdTotal);
+        return tr;
+      };
+
+      UI.lsBody.replaceChildren(
+        createRow(score.away_abbr, score.away, 'away'),
+        createRow(score.home_abbr, score.home, 'home')
+      );
+    } else {
+      UI.lsHead.innerHTML = "";
+      UI.lsBody.innerHTML = "";
+    }
   }
 
   // Init
   setInterval(updateClock, 1000);
   updateClock();
-  loadSettings();
   connectWs();
-  pollGames();
+  pollMLB();
 
 </script>
 </body>
