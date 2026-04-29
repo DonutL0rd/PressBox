@@ -13,9 +13,6 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-
-_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 from pathlib import Path
 
@@ -81,7 +78,7 @@ _ws_clients: set[WebSocket] = set()
 _last_games_hash: str = ""
 
 # ── Batter intel / between-innings caches ────────────────────────
-_last_batter_id_by_game: dict[str, int | None] = {}
+_last_batter_ids: dict[str, int] = {}  # game_id -> last_batter_id
 _batter_vs_pitcher_cache: dict[tuple[int, int], dict | None] = {}
 _other_scores_cache: list[dict] = []
 _other_scores_cache_time: float = 0
@@ -835,10 +832,9 @@ async def dashboard():
 
 @app.get("/api/games")
 async def get_games(date: str | None = None):
-    now_pacific = datetime.now(_PACIFIC)
-    target = datetime.fromisoformat(date) if date else now_pacific
+    target = datetime.fromisoformat(date) if date else datetime.now()
     # Use scheduler's cache for today, fetch directly for other dates
-    if target.date() == now_pacific.date():
+    if target.date() == datetime.now().date():
         games = _scheduler.get_games_for_provider("mlb")
         if games:
             return [_game_to_dict(g) for g in games]
@@ -1174,33 +1170,32 @@ def _get_http_client() -> httpx.AsyncClient:
 @app.get("/api/pitches")
 async def get_pitches(game_id: str | None = None):
     """Return pitch data, batter intel, and between-innings break data."""
-    global _last_batter_id_by_game
-
     empty = {
         "game_id": None,
         "pitches": [],
         "batter": "",
         "pitcher": "",
-        "count": "",
+        "count": "0-0",
         "balls": 0,
         "strikes": 0,
         "outs": 0,
         "inning": "",
         "inning_state": "",
         "runners": {"first": False, "second": False, "third": False},
-        "score": {},
+        "score": {"away": 0, "home": 0, "away_abbr": "", "home_abbr": ""},
         "linescore": [],
-        "zone_top": 0,
-        "zone_bot": 0,
+        "zone_top": 3.4,
+        "zone_bot": 1.6,
         "batter_intel": None,
         "break_data": None,
     }
 
     explicit_game_id = game_id is not None
     target_id = game_id if explicit_game_id else _now_playing_game_id
+
     if not target_id:
         if explicit_game_id:
-            # Explicit callers (e.g. screensaver) may opt into scheduler fallback.
+            # Explicit callers (like screensaver) may opt into scheduler fallback
             live_games = [g for g in _scheduler.get_games_for_provider("mlb") if g.status == GameStatus.LIVE]
             if live_games:
                 target_id = live_games[0].game_id
@@ -1274,8 +1269,9 @@ async def get_pitches(game_id: str | None = None):
         # ── Batter intel ────────────────────────────────
         batter_intel = None
         if batter_id:
-            is_new = batter_id != _last_batter_id_by_game.get(target_id)
-            _last_batter_id_by_game[target_id] = batter_id
+            last_id = _last_batter_ids.get(target_id)
+            is_new = batter_id != last_id
+            _last_batter_ids[target_id] = batter_id
 
             # Determine batter's team
             bat_team = "away" if inning_half == "Top" else "home"
@@ -1753,7 +1749,7 @@ async def get_settings():
         "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
         # Screensaver
         "screensaver_music_size": _config.get("screensaver", {}).get("music_size", "medium"),
-        "screensaver_schedule_scale": _config.get("screensaver", {}).get("schedule_scale", 100),
+        "dvd_bounce": _config.get("screensaver", {}).get("dvd_bounce", False),
         # Navidrome
         "navidrome_server_url": os.getenv("NAVIDROME_URL") or _config.get("navidrome", {}).get("server_url", ""),
         "navidrome_username": os.getenv("NAVIDROME_USERNAME") or _config.get("navidrome", {}).get("username", ""),
@@ -1839,9 +1835,8 @@ async def update_settings(body: dict):
         allowed = ("small", "medium", "large")
         sz = body["screensaver_music_size"] if body["screensaver_music_size"] in allowed else "medium"
         _config.update_nested("screensaver", "music_size", value=sz)
-    if "screensaver_schedule_scale" in body:
-        val = max(50, min(200, int(body["screensaver_schedule_scale"])))
-        _config.update_nested("screensaver", "schedule_scale", value=val)
+    if "dvd_bounce" in body:
+        _config.update_nested("screensaver", "dvd_bounce", value=bool(body["dvd_bounce"]))
     _config.save_user_config()
     log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
     await _broadcast_settings()

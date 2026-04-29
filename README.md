@@ -6,10 +6,8 @@ Self-hosted sports streaming appliance. Runs in Docker on an Ubuntu server conne
 
 1. **Start the Docker container** on your server
 2. **Open the dashboard** at `http://<server-ip>:5000/` from any device
-3. **Browse today's games**, play music, or queue up YouTube videos
-4. **Everything plays on your TV** — MLB via HLS, music via Navidrome, YouTube via Chrome
-
-When nothing is playing, an ambient screensaver shows the day's MLB schedule cycling through each game with scores, innings, and matchup details. If music is playing, the screensaver splits to show album art alongside the schedule.
+3. **Browse today's games** and click Home or Away to pick a feed
+4. **The game plays on your TV** via HLS streaming in Chrome
 
 Authentication is handled entirely via API (Okta password grant) — no browser login required. Provide your MLB.TV credentials in a `.env` file and the system logs in automatically on startup.
 
@@ -100,25 +98,19 @@ Game schedules come from the public [MLB Stats API](https://github.com/toddrob99
 │  ┌─────────────────────▼──────────────────────────┐  │
 │  │  FastAPI + uvicorn (port 5000)                 │  │
 │  │                                                │  │
-│  │  GET  /            → React SPA Frontend        │  │
-│  │  GET  /api/games   → Schedule from Stats API   │  │
-│  │  POST /api/play    → Get stream URL → navigate │  │
-│  │  POST /api/stop    → Stop playback             │  │
-│  │  GET  /player      → HLS player + pitch tracker│  │
-│  │  GET  /screensaver → Ambient schedule display  │  │
-│  │  WS   /ws          → Real-time state push      │  │
-│  └──────┬──────────┬─────────────┬────────────────┘  │
-│         │          │             │                    │
-│  ┌──────▼───────┐  │  ┌─────────▼───────────────┐   │
-│  │ MLBSession   │  │  │ BrowserController       │   │
-│  │ (Okta auth + │  │  │ (Playwright + Chrome)   │   │
-│  │  GraphQL)    │  │  └──────────┬──────────────┘   │
-│  └──────────────┘  │             │                   │
-│                    │        X11 Socket               │
-│  ┌─────────────────▼──┐         │                   │
-│  │ Navidrome Client   │         │                   │
-│  │ (Subsonic API)     │         │                   │
-│  └────────────────────┘         │                   │
+│  │  GET  /           → React SPA Frontend         │  │
+│  │  GET  /api/games  → Schedule from Stats API    │  │
+│  │  POST /api/play   → Get stream URL → navigate  │  │
+│  │  POST /api/stop   → Stop playback             │  │
+│  │  GET  /player     → HLS video player page      │  │
+│  └──────┬────────────────────┬────────────────────┘  │
+│         │                    │                       │
+│  ┌──────▼───────┐    ┌──────▼──────────────────┐    │
+│  │ MLBSession   │    │ BrowserController       │    │
+│  │ (Okta auth + │    │ (Playwright + Chrome)   │    │
+│  │  GraphQL)    │    └──────────┬──────────────┘    │
+│  └──────────────┘               │                   │
+│                            X11 Socket               │
 └─────────────────────────────────┼───────────────────┘
                                   │
                              HDMI Output
@@ -139,8 +131,6 @@ Game schedules come from the public [MLB Stats API](https://github.com/toddrob99
 | `DISPLAY` | No | X display (default: `:0`) |
 | `DATA_DIR` | No | Persistent data path (default: `/data`) |
 | `CHROME_PATH` | No | Chrome binary override |
-| `NAVIDROME_URL` | No | Navidrome server URL (e.g. `http://192.168.1.100:4533`) |
-| `NAVIDROME_USERNAME` | No | Navidrome account username |
 
 ### Config file (`config/default.yaml`)
 
@@ -180,24 +170,10 @@ TV-Automator/
 │   ├── main.py                        # Entry point (uvicorn)
 │   ├── config.py                      # Layered config (yaml + env)
 │   ├── web/
-│   │   ├── app.py                     # FastAPI routes + WebSocket hub
-│   │   ├── templates/
-│   │   │   ├── player.html            # HLS video player + pitch tracker overlay
-│   │   │   └── screensaver.html       # Ambient schedule + music display
+│   │   ├── app.py                     # FastAPI routes
 │   │   └── frontend/                  # React SPA (Vite + TypeScript)
-│   │       └── src/
-│   │           ├── views/
-│   │           │   ├── Dashboard.tsx   # Game list + stream controls
-│   │           │   ├── Music.tsx       # Music library + transport bar
-│   │           │   ├── YouTube.tsx     # Video browser + playback controls
-│   │           │   └── Settings.tsx    # Credentials, overlay, and display settings
-│   │           ├── components/
-│   │           │   ├── Sidebar.tsx     # Navigation sidebar
-│   │           │   └── NowPlayingBar.tsx
-│   │           └── hooks/
-│   │               └── useTvAutomator.tsx  # Global state + WebSocket
 │   ├── providers/
-│   │   ├── base.py                    # Provider interface (Game, Team, GameStatus)
+│   │   ├── base.py                    # Provider interface
 │   │   ├── mlb.py                     # MLB schedule (Stats API)
 │   │   └── mlb_session.py             # MLB auth + streams (Okta + GraphQL)
 │   ├── automator/
@@ -213,10 +189,9 @@ TV-Automator/
 
 - [x] Phase 1: MLB game playback with web dashboard
 - [x] Phase 2: API-based auth (Okta), HLS streaming, home/away feed selection
-- [x] Phase 3: React SPA, music integration (Navidrome), YouTube playback
-- [x] Phase 4: Ambient screensaver, pitch tracker, batter intel, between-innings overlays
-- [ ] Phase 5: Multiview (picture-in-picture / split-screen)
-- [ ] Phase 6: Additional providers (F1 TV, NBA, NHL, NFL)
+- [ ] Phase 3: Auto-start for favorite teams, live score push updates
+- [ ] Phase 4: Multiview (picture-in-picture / split-screen)
+- [ ] Phase 5: Additional providers (F1 TV, NBA, NHL, NFL)
 
 ## Development
 
