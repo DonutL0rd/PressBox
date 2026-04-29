@@ -184,18 +184,17 @@
     pointer-events: auto;
   }
 
-  .game-teams {
-    display: flex;
-    align-items: center;
-    gap: 30px;
-    margin-bottom: 20px;
-  }
-
-  .team-block {
+  .game-scoreboard {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    min-width: 100px;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .team-row {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
   }
 
   .team-abbr {
@@ -203,49 +202,47 @@
     font-weight: 700;
     letter-spacing: -0.02em;
     line-height: 1;
+    min-width: 180px;
     transition: var(--transition-lazy);
   }
 
   body.has-music .team-abbr {
+    font-size: 3.5rem;
+    min-width: 150px;
+  }
+
+  .team-score {
+    font-size: 4rem;
+    font-weight: 200;
+    line-height: 1;
+    color: var(--text-primary);
+    min-width: 60px;
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .team-score {
     font-size: 3.5rem;
   }
 
   .team-name {
     font-size: 0.85rem;
     color: var(--text-muted);
-    margin-top: 6px;
     font-weight: 400;
     letter-spacing: 0.05em;
     text-transform: uppercase;
+    margin-left: 4px;
   }
 
   body.has-music .team-name {
     font-size: 0.75rem;
   }
 
-  .game-at {
-    font-size: 1.6rem;
-    font-weight: 200;
-    color: var(--text-muted);
-    padding-bottom: 10px;
-  }
-
-  body.has-music .game-at {
-    font-size: 1.4rem;
-  }
-
-  .game-score {
-    font-size: 4rem;
-    font-weight: 200;
-    letter-spacing: -2px;
-    line-height: 1;
-    color: var(--text-primary);
-    margin-bottom: 20px;
-    transition: var(--transition-lazy);
-  }
-
-  body.has-music .game-score {
-    font-size: 3.5rem;
+  .game-divider {
+    width: 60px;
+    height: 1px;
+    background: var(--text-muted);
+    opacity: 0.3;
+    margin: 4px 0;
   }
 
   .game-status {
@@ -448,7 +445,7 @@
 
     const isLive = game.status === 'live';
     const isFinal = game.status === 'final';
-    const hasScore = game.away_team.score != null && game.home_team.score != null;
+    const showScore = (isLive || isFinal) && game.away_team.score != null && game.home_team.score != null;
 
     let statusClass = 'scheduled';
     let statusText = formatGameTime(game.start_time);
@@ -467,10 +464,8 @@
       statusText = 'Postponed';
     }
 
-    let scoreHtml = '';
-    if (hasScore && (isLive || isFinal)) {
-      scoreHtml = `<div class="game-score">${game.away_team.score} \u2013 ${game.home_team.score}</div>`;
-    }
+    const awayScore = showScore ? `<div class="team-score">${game.away_team.score}</div>` : '';
+    const homeScore = showScore ? `<div class="team-score">${game.home_team.score}</div>` : '';
 
     let detailParts = [];
     if (game.venue) detailParts.push(game.venue);
@@ -489,18 +484,17 @@
     }
 
     card.innerHTML = `
-      <div class="game-teams">
-        <div class="team-block">
+      <div class="game-scoreboard">
+        <div class="team-row">
           <div class="team-abbr">${game.away_team.abbreviation}</div>
-          <div class="team-name">${game.away_team.name}</div>
+          ${awayScore}
         </div>
-        <div class="game-at">@</div>
-        <div class="team-block">
+        <div class="game-divider"></div>
+        <div class="team-row">
           <div class="team-abbr">${game.home_team.abbreviation}</div>
-          <div class="team-name">${game.home_team.name}</div>
+          ${homeScore}
         </div>
       </div>
-      ${scoreHtml}
       <div class="game-status ${statusClass}">${statusText}</div>
       ${detailHtml}
       ${pitcherHtml}

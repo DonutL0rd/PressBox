@@ -13,6 +13,9 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
 
 from pathlib import Path
 
@@ -832,9 +835,10 @@ async def dashboard():
 
 @app.get("/api/games")
 async def get_games(date: str | None = None):
-    target = datetime.fromisoformat(date) if date else datetime.now()
+    now_pacific = datetime.now(_PACIFIC)
+    target = datetime.fromisoformat(date) if date else now_pacific
     # Use scheduler's cache for today, fetch directly for other dates
-    if target.date() == datetime.now().date():
+    if target.date() == now_pacific.date():
         games = _scheduler.get_games_for_provider("mlb")
         if games:
             return [_game_to_dict(g) for g in games]

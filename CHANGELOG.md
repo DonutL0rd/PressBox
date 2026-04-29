@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.4.0] — 2026-04-28
+
+### Added
+- **Ambient Screensaver** — complete rewrite of `screensaver.html` from a single-game MLB dashboard to a dual-mode ambient display. Shows the full day's MLB schedule as a carousel (8-second crossfade between game cards) with team abbreviations, scores, inning state, venue, broadcast info, and probable pitchers. When music is playing, the layout splits: album art + track metadata on the left, schedule on the right, with a blurred album-glow background (`filter: blur(120px) saturate(1.8)`)
+- **Screensaver Schedule Scale setting** — `screensaver_schedule_scale` (50–200%, default 100) applies `transform: scale()` to the schedule section for different display sizes. Configurable in Settings UI and pushed live via WebSocket
+- **Pitch Tracker enhancements** — dynamic SVG coordinate mapping with per-batter `zone_top`/`zone_bot`, pitch color-coding by outcome (green in-play, orange strikes/fouls, blue balls), latest pitch highlighted with larger radius and speed label, comprehensive hash-based change detection instead of count-based
+- **Batter Intel Card** — flashes batter stats (hits, RBIs, HR, walks) for 8 seconds when a new batter steps up. Controlled by `batter_intel_enabled` setting
+- **Between-Innings Break Overlay** — displays game score, due-up batters, and pitcher summary (IP, H, R, ER, BB, K) during breaks. Controlled by `between_innings_enabled` setting
+- **Overlay Delay setting** — `overlay_delay` (0–15 seconds, default 2) delays overlay updates to sync with TV broadcast delay
+- **Stream Reconnection System** — `_do_reconnect()` with automatic retry (up to 3 attempts, 30-second delays), fallback to condensed game, and structured error/recovery broadcasts (`stream_error`, `stream_recovered`, `stream_dead`)
+- **Stream Controls in Dashboard** — quality selector (auto + HLS resolution levels), captions toggle, pitch tracker toggle, batter intel toggle, innings break toggle, overlay delay slider, tracker size dropdown, TV power on/off via CEC
+- **YouTube Playback Controls** — inline controls with play/pause, seek bar with time display, playback speed selector (0.5x–2x), captions toggle, and stop button
+- **Music Transport Bar** — persistent bar in Music view with shuffle/prev/play-pause/next/repeat controls, progress bar with seek, album art thumbnail, track title/artist, like/unlike, and stop button
+- **Stream Alert System** — centralized `showAlert(message, level)` via TvAutomator context, replaces per-component toast notifications. WebSocket `error`/`info` message types with deduplication via ID counter
+- **Music API endpoints** — `GET /api/music/starred` (liked songs), `POST /api/music/star` (star/unstar with `{ id, action }`)
+- **YouTube API endpoints** — `GET /api/youtube/state` (playback state), `POST /api/youtube/command` (play, pause, seek, speed, cc)
+- **Shared HTTP client** — `httpx.AsyncClient` created at startup with connection pooling (10 max connections, 10s timeout), reused for pitch and score fetches, properly closed on shutdown
+- **Music concurrency lock** — `asyncio.Lock` protecting `_stop_music_internal()` for thread-safe state management
+
+### Changed
+- **Design System** — replaced warm brown/espresso palette with cooler deep grays and teal accent. `#0e0603` → `#050505`, `#f0e0c8` → `#e0e0e0`, `#c39460` → `#1a9a8a`. Inter font family with explicit weight variants (200–700). Longer 2-second lazy transitions
+- **HLS Buffer Tuning** — `maxBufferLength` 30s → 60s, `maxMaxBufferLength` 120s → 600s, `liveSyncDurationCount` 3 → 5, `liveMaxLatencyDurationCount` 6 → 10. Captions disabled by default on manifest parse
+- **Pitch Tracker polling** — initial poll interval reduced from 2000ms to 500ms for faster batter intel appearance
+- **Settings UI labels** — "Strike Zone Overlay" → "Pitch Tracker", "Strike Zone Size" → "Tracker Size"
+- **Music status broadcasting** — deduplication via `playing|paused|song|position` comparison, skips redundant position updates
+- **Game detail polling** — live game poll interval 20s → 30s, string comparison of JSON responses to skip identical fetches
+- **Status broadcast** — now includes `youtube_video_id` field for frontend YouTube management
+- **Heartbeat monitoring** — captures `_stream_info` reference at loop start to prevent race conditions, broadcasts structured error on failure
+- **Timezone handling** — `GET /api/games` and game scheduler `refresh()` now use `datetime.now(ZoneInfo("America/Los_Angeles"))` instead of UTC `datetime.now()`, fixing wrong-day schedule fetch when container clock is UTC
+
+### Fixed
+- **Pitch tracker visibility** — properly responds to `strike_zone_enabled` setting toggles, removed stale `currentBatterId` tracking that caused phantom batter cards
+- **Unnecessary re-renders** — `shallowEqual()` comparisons prevent setState when WebSocket data is identical, `React.memo()` on `GameListItem` and `VideoCard`, `useMemo()` for dashboard counts, `useCallback()` for event handlers
+- **Fallback polling** — now only fires when WebSocket is disconnected (via `connectedRef`), previously fired every 60s regardless of connection state
+- **Player command handling** — accepts both `command` and legacy `action` fields for backward compatibility, caption commands handle both HLS subtitles and native text tracks
+- **Wrong-day schedule on screensaver** — container UTC time caused `/api/games` to return tomorrow's schedule after ~5 PM Pacific. Fixed by using Pacific timezone for date resolution in both `app.py` and `game_scheduler.py`
+
+### Removed
+- `src/tv_automator/web/frontend/src/views/NowPlaying.tsx` — full-screen now-playing view (328 lines), functionality moved inline to Dashboard/Music/YouTube views
+- `src/tv_automator/web/frontend/src/views/NowPlaying.css` — 297 lines of styling
+- `src/tv_automator/web/frontend/src/components/TopBar.tsx` — top bar component, replaced by embedded controls in each view
+- `src/tv_automator/web/frontend/src/assets/hero.png`, `react.svg`, `vite.svg` — unused assets
+- **`dvd_bounce` setting** — removed from backend, Settings UI, and screensaver
+
+### New files
+- `src/tv_automator/web/frontend/src/views/YouTube.css` — styles for YouTube view with inline playback controls
+
 ## [0.3.0] - 2026-04-13
 
 ### Added
