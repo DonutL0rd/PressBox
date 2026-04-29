@@ -35,7 +35,7 @@ const Settings: React.FC = () => {
   const cecEnabled = !!settings.cec_enabled;
   const pollInterval = settings.poll_interval || 60;
   const musicSize = settings.screensaver_music_size || 'medium';
-  const dvdBounce = !!settings.dvd_bounce;
+  const scheduleScale = settings.screensaver_schedule_scale ?? 100;
   const mlbAuthenticated = settings.mlb_authenticated ?? null;
 
   // YouTube Channels
@@ -342,15 +342,20 @@ const Settings: React.FC = () => {
 
           <div className="settings-field-row">
             <div>
-              <div className="settings-label">DVD Bounce</div>
-              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Bounce screensaver content around edges like a DVD logo</div>
+              <div className="settings-label">Schedule Scale</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Size of the baseball schedule on the screensaver</div>
             </div>
-            <label className="switch">
-              <input type="checkbox" checked={dvdBounce} onChange={e => {
-                updateSetting({ dvd_bounce: e.target.checked });
-              }} />
-              <span className="slider"></span>
-            </label>
+            <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+              <input
+                className="settings-input"
+                type="number"
+                min="50" max="200" step="10"
+                value={scheduleScale}
+                onChange={e => updateSetting({ screensaver_schedule_scale: parseInt(e.target.value) || 100 })}
+                style={{width: '70px', textAlign: 'center'}}
+              />
+              <span style={{fontSize:'0.8rem', color:'var(--text-tertiary)'}}>%</span>
+            </div>
           </div>
         </div>
 

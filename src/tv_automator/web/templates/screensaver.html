@@ -2,340 +2,579 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>PressBox</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ambient PressBox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;700&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg-deep: #050505;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-muted: #404040;
+    --accent: #1a9a8a;
+    --live-red: #e74c3c;
+    --transition-lazy: all 2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
   html, body {
     width: 100%; height: 100%;
-    background: #0e0603;
+    background-color: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #f0e0c8;
   }
 
-  /* Subtle grain texture overlay */
-  body::before {
-    content: '';
+  /* Ambient Background */
+  #ambient-bg {
     position: fixed; inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-    pointer-events: none; z-index: 0; opacity: 0.35;
+    z-index: 0;
+    background: radial-gradient(circle at 50% 50%, #101010 0%, #050505 100%);
+    transition: var(--transition-lazy);
   }
 
-  /* Background gradient — espresso to dark roast */
-  body::after {
-    content: '';
-    position: fixed; inset: 0;
-    background: radial-gradient(ellipse at 30% 40%, rgba(30, 12, 5, 0.6) 0%, transparent 60%),
-                radial-gradient(ellipse at 70% 70%, rgba(12, 44, 86, 0.15) 0%, transparent 50%);
-    pointer-events: none; z-index: 0;
-  }
-
-  .container {
-    position: absolute; z-index: 1;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 36px;
-    animation: fadeIn 1.2s ease-in;
-    transition: transform 8s cubic-bezier(0.45, 0.05, 0.55, 0.95);
-    /* leave room on all sides so content never clips when shifted */
-    width: calc(100% - 160px);
-    height: calc(100% - 160px);
-    top: 80px; left: 80px;
-  }
-
-  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-  /* Deep-dim overlay — fades in/out via JS class toggle */
-  #dim-overlay {
-    position: fixed; inset: 0; z-index: 50;
-    background: #000;
+  #album-glow {
+    position: fixed; inset: -10%;
+    z-index: 1;
     opacity: 0;
-    pointer-events: none;
-    transition: opacity 3s ease-in-out;
-  }
-  #dim-overlay.dimming { opacity: 0.97; }
-
-  /* Clock */
-  .clock-block { text-align: center; transition: all 0.8s ease; }
-
-  .clock {
-    font-size: 8rem; font-weight: 200; letter-spacing: -4px;
-    color: rgba(240, 224, 200, 0.78); line-height: 1;
-    transition: font-size 0.8s ease;
-  }
-  .clock-date {
-    font-size: 1.3rem; font-weight: 400;
-    color: rgba(195, 148, 95, 0.75);
-    margin-top: 10px;
-    transition: font-size 0.8s ease;
+    filter: blur(120px) saturate(1.8);
+    transition: opacity 4s ease;
+    object-fit: cover;
+    width: 120%; height: 120%;
+    animation: slow-glow 60s infinite alternate ease-in-out;
   }
 
-  /* Shrink clock when music is prominently displayed */
-  .container.has-music .clock { font-size: 5rem; letter-spacing: -2px; }
-  .container.has-music .clock-date { font-size: 1rem; margin-top: 6px; }
-
-  /* Game card */
-  .upcoming { text-align: center; max-width: 720px; transition: all 0.8s ease; }
-
-  .upcoming-label {
-    font-size: 0.8rem; font-weight: 700;
-    color: rgba(185, 140, 80, 0.6);
-    text-transform: uppercase; letter-spacing: 0.12em;
-    margin-bottom: 18px;
-  }
-  .upcoming-label.live-label {
-    color: rgba(0, 160, 120, 0.85);
+  @keyframes slow-glow {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(2%, 2%) scale(1.1) rotate(2deg); }
   }
 
-  .next-game {
-    background: rgba(35, 16, 7, 0.75);
-    border: 1px solid rgba(100, 60, 25, 0.45);
-    border-radius: 18px;
-    padding: 26px 44px;
-    display: inline-flex;
+  body.has-music #album-glow {
+    opacity: 0.15;
+  }
+
+  /* Main Stage */
+  .stage {
+    position: relative;
+    z-index: 10;
+    width: 100%; height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 100px;
+    transition: padding 2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  body.has-music .stage {
+    padding: 60px 80px;
+  }
+
+  /* Audio Side */
+  .audio-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 40px;
+    opacity: 0;
+    transform: translateX(-50px);
+    transition: var(--transition-lazy);
+    max-width: 0;
+    overflow: hidden;
+  }
+
+  body.has-music .audio-wrap {
+    opacity: 1;
+    transform: translateX(0);
+    max-width: 600px;
+    margin-right: 60px;
+  }
+
+  #album-art {
+    width: 500px; height: 500px;
+    border-radius: 8px;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.9);
+    object-fit: cover;
+    transition: opacity 1.5s ease;
+  }
+
+  .track-meta {
+    max-width: 500px;
+  }
+
+  .track-title {
+    font-size: 2.8rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+    letter-spacing: -0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .track-artist {
+    font-size: 1.6rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  /* Schedule Section */
+  .schedule-wrap {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.06);
-    transition: all 0.8s ease;
-  }
-  .next-game.live-game {
-    border-color: rgba(0, 120, 100, 0.5);
-    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 140, 110, 0.2), inset 0 1px 0 rgba(0, 200, 160, 0.06);
+    text-align: center;
+    transition: var(--transition-lazy);
+    max-width: 900px;
+    transform-origin: center center;
   }
 
-  /* Compact game card when music is showing */
-  .container.has-music .next-game { padding: 14px 30px; gap: 7px; }
-  .container.has-music .upcoming-label { font-size: 0.7rem; margin-bottom: 10px; }
-
-  .next-matchup {
-    display: flex; align-items: center; gap: 28px;
-  }
-  .next-team { font-size: 3rem; font-weight: 800; color: rgba(240, 224, 200, 0.78); transition: font-size 0.8s ease; }
-  .next-team.favorite { color: rgba(26, 154, 138, 0.82); }
-  .container.has-music .next-team { font-size: 1.9rem; }
-  .next-at { font-size: 1.1rem; color: rgba(185, 140, 80, 0.55); font-weight: 400; }
-
-  .next-time { font-size: 0.95rem; color: rgba(185, 145, 95, 0.7); }
-  .next-countdown { font-size: 1.05rem; color: #1a9a8a; font-weight: 600; }
-
-  .score-display {
-    font-size: 1.1rem; color: rgba(240, 224, 200, 0.5); font-weight: 500;
-    letter-spacing: 0.05em;
+  body.has-music .schedule-wrap {
+    margin-left: 0;
+    align-items: center;
+    text-align: center;
+    flex: 1.5;
   }
 
-  .no-games { color: rgba(185, 140, 80, 0.4); font-size: 1rem; }
+  .schedule-header {
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    margin-bottom: 50px;
+    transition: var(--transition-lazy);
+  }
 
-  /* Auto-play indicator */
-  .autoplay-status {
-    display: flex; align-items: center; gap: 10px;
-    background: rgba(12, 44, 86, 0.35);
-    border: 1px solid rgba(26, 154, 138, 0.25);
-    border-radius: 24px;
-    padding: 10px 22px;
+  body.has-music .schedule-header {
+    margin-bottom: 40px;
+    font-size: 1.1rem;
+  }
+
+  /* Game Card Carousel */
+  .game-carousel {
+    position: relative;
+    width: 100%;
+    min-height: 320px;
+  }
+
+  .game-card {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 1.2s ease, transform 1.2s ease;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  body.has-music .game-card {
+    align-items: center;
+  }
+
+  .game-card.active {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .game-scoreboard {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .team-row {
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+  }
+
+  .team-abbr {
+    font-size: 4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    min-width: 180px;
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .team-abbr {
+    font-size: 3.5rem;
+    min-width: 150px;
+  }
+
+  .team-score {
+    font-size: 4rem;
+    font-weight: 200;
+    line-height: 1;
+    color: var(--text-primary);
+    min-width: 60px;
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .team-score {
+    font-size: 3.5rem;
+  }
+
+  .team-name {
     font-size: 0.85rem;
-  }
-  .autoplay-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: #1a9a8a;
-    box-shadow: 0 0 8px rgba(26, 154, 138, 0.7);
-    flex-shrink: 0;
-    animation: pulse 2.5s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-  .autoplay-text { color: rgba(185, 200, 210, 0.8); }
-  .autoplay-game { color: #c4ced4; font-weight: 600; margin-left: 4px; }
-  .autoplay-feed { color: rgba(26, 154, 138, 0.8); font-size: 0.75rem; margin-left: 6px; }
-
-  .autoplay-off {
-    background: rgba(20, 10, 4, 0.4);
-    border: 1px solid rgba(100, 60, 25, 0.25);
-    border-radius: 24px;
-    padding: 10px 22px;
-    font-size: 0.82rem;
-    color: rgba(150, 110, 70, 0.4);
+    color: var(--text-muted);
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-left: 4px;
   }
 
-  /* ── Now Playing music (base = small) ── */
-  .now-playing-music {
-    display: flex; align-items: center; gap: 18px;
-    background: rgba(35, 16, 7, 0.75);
-    border: 1px solid rgba(100, 60, 25, 0.45);
-    border-radius: 18px;
-    padding: 18px 28px;
-    box-shadow: 0 4px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 220, 150, 0.06);
-    max-width: 560px;
-  }
-  .npm-art {
-    width: 72px; height: 72px; border-radius: 10px; object-fit: cover;
-    flex-shrink: 0; background: rgba(20, 10, 4, 0.6);
-  }
-  .npm-info { min-width: 0; flex: 1; }
-  .npm-label {
-    font-size: 0.7rem; font-weight: 700;
-    color: rgba(26, 154, 138, 0.8);
-    text-transform: uppercase; letter-spacing: 0.12em;
-    margin-bottom: 6px;
-  }
-  .npm-title {
-    font-size: 1.2rem; font-weight: 600;
-    color: rgba(240, 224, 200, 0.85);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .npm-artist {
-    font-size: 0.88rem; color: rgba(185, 145, 95, 0.7);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    margin-top: 2px;
-  }
-  .npm-progress {
-    margin-top: 8px; display: flex; align-items: center; gap: 8px;
-  }
-  .npm-bar-bg {
-    flex: 1; height: 3px; border-radius: 2px;
-    background: rgba(100, 60, 25, 0.4);
-    overflow: hidden;
-  }
-  .npm-bar-fill {
-    height: 100%; border-radius: 2px;
-    background: rgba(26, 154, 138, 0.7);
-    transition: width 2s linear;
-  }
-  .npm-time {
-    font-size: 0.7rem; color: rgba(185, 145, 95, 0.5);
-    font-variant-numeric: tabular-nums;
-    min-width: 32px;
+  body.has-music .team-name {
+    font-size: 0.75rem;
   }
 
-  /* ── Medium size ── */
-  #music-block.npm-medium .now-playing-music {
-    padding: 24px 38px; gap: 26px; max-width: 740px;
+  .game-divider {
+    width: 60px;
+    height: 1px;
+    background: var(--text-muted);
+    opacity: 0.3;
+    margin: 4px 0;
   }
-  #music-block.npm-medium .npm-art { width: 116px; height: 116px; border-radius: 14px; }
-  #music-block.npm-medium .npm-label { font-size: 0.78rem; }
-  #music-block.npm-medium .npm-title { font-size: 1.75rem; }
-  #music-block.npm-medium .npm-artist { font-size: 1.1rem; }
-  #music-block.npm-medium .npm-time { font-size: 0.76rem; min-width: 36px; }
-  #music-block.npm-medium .npm-bar-bg { height: 4px; }
 
-  /* ── Large size — vertical layout ── */
-  #music-block.npm-large .now-playing-music {
-    flex-direction: column; align-items: center; text-align: center;
-    max-width: 540px; padding: 38px 52px; gap: 18px;
+  .game-status {
+    font-size: 1.3rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
   }
-  #music-block.npm-large .npm-art {
-    width: 230px; height: 230px; border-radius: 22px; flex-shrink: 0;
+
+  .game-status.live {
+    color: var(--live-red);
   }
-  #music-block.npm-large .npm-info { min-width: 0; width: 100%; }
-  #music-block.npm-large .npm-label { font-size: 0.82rem; margin-bottom: 8px; }
-  #music-block.npm-large .npm-title {
-    font-size: 2.5rem; font-weight: 700;
-    white-space: normal; overflow: visible; text-overflow: clip;
-    text-align: center; line-height: 1.15;
+
+  .game-status.final {
+    color: var(--text-secondary);
   }
-  #music-block.npm-large .npm-artist { font-size: 1.45rem; text-align: center; }
-  #music-block.npm-large .npm-time { font-size: 0.85rem; min-width: 42px; }
-  #music-block.npm-large .npm-bar-bg { height: 5px; }
-  #music-block.npm-large .npm-progress { margin-top: 12px; }
+
+  .game-status.scheduled {
+    color: var(--accent);
+  }
+
+  .game-detail {
+    font-size: 1rem;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-top: 4px;
+  }
+
+  /* Pips */
+  .schedule-pips {
+    display: flex;
+    gap: 8px;
+    margin-top: 50px;
+    transition: var(--transition-lazy);
+  }
+
+  body.has-music .schedule-pips {
+    margin-top: 30px;
+  }
+
+  .pip {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: background 0.6s ease, transform 0.6s ease;
+  }
+
+  .pip.active {
+    background: var(--accent);
+    transform: scale(1.5);
+  }
+
+  .pip.live {
+    background: var(--live-red);
+  }
+
+  /* No games state */
+  .no-games {
+    font-size: 2rem;
+    font-weight: 200;
+    color: var(--text-muted);
+    letter-spacing: -0.5px;
+  }
+
+  /* Clock */
+  .clock-overlay {
+    position: fixed;
+    top: 50px; right: 60px;
+    text-align: right;
+    z-index: 100;
+  }
+
+  #clock-time {
+    font-size: 2rem;
+    font-weight: 300;
+    color: var(--text-secondary);
+    letter-spacing: -1px;
+  }
+
 </style>
 </head>
 <body>
-<div id="dim-overlay"></div>
-<div class="container" id="container">
-  <div class="clock-block">
-    <div class="clock" id="clock"></div>
-    <div class="clock-date" id="clock-date"></div>
-  </div>
-  <!-- music-block is first so it appears above the game card when playing -->
-  <div id="music-block"></div>
-  <div class="upcoming" id="upcoming"></div>
-  <div id="autoplay-block"></div>
-</div>
-<script>
-(function() {
-  let favorites = new Set();
-  let npmSize = 'medium'; // overridden by settings
 
-  const TZ = 'America/Los_Angeles';
+<div id="ambient-bg"></div>
+<img id="album-glow" src="" alt="">
+
+<div class="clock-overlay">
+  <div id="clock-time">12:00 PM</div>
+</div>
+
+<div class="stage">
+
+  <div class="audio-wrap">
+    <img id="album-art" src="" alt="Album Art">
+    <div class="track-meta">
+      <div class="track-title" id="track-title"></div>
+      <div class="track-artist" id="track-artist"></div>
+    </div>
+  </div>
+
+  <div class="schedule-wrap">
+    <div class="schedule-header" id="schedule-header"></div>
+    <div class="game-carousel" id="game-carousel"></div>
+    <div class="schedule-pips" id="schedule-pips"></div>
+  </div>
+
+</div>
+
+<script>
+  let state = {
+    music: { playing: false, song: null },
+    games: [],
+    currentIndex: 0,
+    cycleTimer: null
+  };
+
+  const CYCLE_MS = 8000;
+
+  const UI = {
+    body: document.body,
+    clock: document.getElementById('clock-time'),
+    albumArt: document.getElementById('album-art'),
+    albumGlow: document.getElementById('album-glow'),
+    trackTitle: document.getElementById('track-title'),
+    trackArtist: document.getElementById('track-artist'),
+    header: document.getElementById('schedule-header'),
+    carousel: document.getElementById('game-carousel'),
+    pips: document.getElementById('schedule-pips'),
+    scheduleWrap: document.querySelector('.schedule-wrap')
+  };
 
   function updateClock() {
     const now = new Date();
-    const parts = now.toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true }).split(' ');
-    const timeParts = parts[0].split(':');
-    document.getElementById('clock').textContent =
-      timeParts[0] + ':' + timeParts[1];
-    document.getElementById('clock-date').textContent =
-      now.toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric' });
-  }
-
-  function formatCountdown(ms) {
-    if (ms <= 0) return 'Starting now';
-    const h = Math.floor(ms / 3600000);
-    const m = Math.floor((ms % 3600000) / 60000);
-    if (h > 0) return 'Starts in ' + h + 'h ' + m + 'm';
-    return 'Starts in ' + m + 'm';
+    UI.clock.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
   function connectWs() {
-    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    var ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
-    
-    ws.onmessage = function(e) {
-      try {
-        var data = JSON.parse(e.data);
-        if (data.type === 'games') {
-          if (Array.isArray(data.games)) renderUpcoming(data.games);
-        } else if (data.type === 'music') {
-          currentMusic = data;
-          renderMusic(data);
-        } else if (data.type === 'autoplay') {
-          currentAutoplay = data;
-          renderAutoplay(currentAutoplay, currentSettings);
-        } else if (data.type === 'settings') {
-          currentSettings = data;
-          if (data.screensaver_music_size) {
-            npmSize = data.screensaver_music_size;
-            if (currentMusic) renderMusic(currentMusic);
-          }
-          var wanted = !!data.dvd_bounce;
-          if (wanted !== dvdBounce) {
-            dvdBounce = wanted;
-            if (dvdBounce) enableDvdBounce();
-            else disableDvdBounce();
-          }
-          renderAutoplay(currentAutoplay, currentSettings);
-        }
-      } catch (err) {}
-    };
-    
-    ws.onclose = function() {
-      setTimeout(connectWs, 3000);
-    };
-  }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
-  let currentSettings = null;
-  let currentMusic = null;
-  let currentAutoplay = null;
-
-  async function init() {
-    try {
-      var fRes = await fetch('/api/favorites');
-      if (fRes.ok) {
-        var fData = await fRes.json();
-        favorites = new Set(fData.teams || []);
+    ws.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      if (data.type === 'music') {
+        handleMusicUpdate(data);
+      } else if (data.type === 'settings') {
+        applySettings(data);
       }
-    } catch(e) {}
-    connectWs();
+    };
+
+    ws.onclose = () => setTimeout(connectWs, 3000);
   }
 
-  updateClock();
-  setInterval(updateClock, 1000);
-  init();
+  function handleMusicUpdate(data) {
+    const isPlaying = data.playing && !data.paused;
+    const song = data.song;
 
-  // Start with random shift
-  startRandomShift();
-})();
+    if (isPlaying && song) {
+      if (!state.music.song || state.music.song.id !== song.id) {
+        const artUrl = `/api/music/cover/${song.albumId || song.id}?size=600`;
+        UI.albumArt.style.opacity = 0;
+        setTimeout(() => {
+          UI.albumArt.src = artUrl;
+          UI.albumGlow.src = artUrl;
+          UI.trackTitle.textContent = song.title;
+          UI.trackArtist.textContent = song.artist;
+          UI.albumArt.style.opacity = 1;
+        }, 500);
+      }
+      state.music.playing = true;
+      state.music.song = song;
+      UI.body.classList.add('has-music');
+    } else {
+      state.music.playing = false;
+      UI.body.classList.remove('has-music');
+    }
+  }
+
+  function applySettings(data) {
+    const scale = (data.screensaver_schedule_scale || 100) / 100;
+    UI.scheduleWrap.style.transform = `scale(${scale})`;
+  }
+
+  async function loadSettings() {
+    try {
+      const resp = await fetch('/api/settings');
+      const data = await resp.json();
+      applySettings(data);
+    } catch (e) {}
+  }
+
+  function formatGameTime(isoString) {
+    const d = new Date(isoString);
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function buildGameCard(game) {
+    const card = document.createElement('div');
+    card.className = 'game-card';
+
+    const isLive = game.status === 'live';
+    const isFinal = game.status === 'final';
+    const showScore = (isLive || isFinal) && game.away_team.score != null && game.home_team.score != null;
+
+    let statusClass = 'scheduled';
+    let statusText = formatGameTime(game.start_time);
+    if (isLive) {
+      statusClass = 'live';
+      const inning = game.extra?.current_inning;
+      const inningState = game.extra?.inning_state;
+      statusText = inning ? `Live \u2022 ${inningState || ''} ${inning}` : 'Live';
+    } else if (isFinal) {
+      statusClass = 'final';
+      statusText = 'Final';
+    } else if (game.status === 'pre_game') {
+      statusText = formatGameTime(game.start_time) + ' \u2022 Pre-Game';
+    } else if (game.status === 'postponed') {
+      statusClass = 'final';
+      statusText = 'Postponed';
+    }
+
+    const awayScore = showScore ? `<div class="team-score">${game.away_team.score}</div>` : '';
+    const homeScore = showScore ? `<div class="team-score">${game.home_team.score}</div>` : '';
+
+    let detailParts = [];
+    if (game.venue) detailParts.push(game.venue);
+    if (game.extra?.national_broadcasts) detailParts.push(game.extra.national_broadcasts);
+    const detailHtml = detailParts.length
+      ? `<div class="game-detail">${detailParts.join(' \u2022 ')}</div>`
+      : '';
+
+    let pitcherHtml = '';
+    if (!isLive && !isFinal) {
+      const awayP = game.extra?.away_probable_pitcher;
+      const homeP = game.extra?.home_probable_pitcher;
+      if (awayP && homeP) {
+        pitcherHtml = `<div class="game-detail">${awayP} vs ${homeP}</div>`;
+      }
+    }
+
+    card.innerHTML = `
+      <div class="game-scoreboard">
+        <div class="team-row">
+          <div class="team-abbr">${game.away_team.abbreviation}</div>
+          ${awayScore}
+        </div>
+        <div class="game-divider"></div>
+        <div class="team-row">
+          <div class="team-abbr">${game.home_team.abbreviation}</div>
+          ${homeScore}
+        </div>
+      </div>
+      <div class="game-status ${statusClass}">${statusText}</div>
+      ${detailHtml}
+      ${pitcherHtml}
+    `;
+
+    return card;
+  }
+
+  function renderSchedule(games) {
+    state.games = games;
+    UI.carousel.innerHTML = '';
+    UI.pips.innerHTML = '';
+
+    if (games.length === 0) {
+      UI.carousel.innerHTML = '<div class="no-games">No games today</div>';
+      UI.header.textContent = "MLB Schedule";
+      return;
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    UI.header.textContent = dateStr + ' \u2022 ' + games.length + ' Game' + (games.length !== 1 ? 's' : '');
+
+    games.forEach((game, i) => {
+      const card = buildGameCard(game);
+      if (i === state.currentIndex) card.classList.add('active');
+      UI.carousel.appendChild(card);
+
+      const pip = document.createElement('div');
+      pip.className = 'pip';
+      if (i === state.currentIndex) pip.classList.add('active');
+      if (game.status === 'live') pip.classList.add('live');
+      UI.pips.appendChild(pip);
+    });
+
+    startCycle();
+  }
+
+  function showGame(index) {
+    const cards = UI.carousel.querySelectorAll('.game-card');
+    const pips = UI.pips.querySelectorAll('.pip');
+
+    cards.forEach((c, i) => c.classList.toggle('active', i === index));
+    pips.forEach((p, i) => p.classList.toggle('active', i === index));
+
+    state.currentIndex = index;
+  }
+
+  function startCycle() {
+    if (state.cycleTimer) clearInterval(state.cycleTimer);
+    if (state.games.length <= 1) return;
+
+    state.cycleTimer = setInterval(() => {
+      const next = (state.currentIndex + 1) % state.games.length;
+      showGame(next);
+    }, CYCLE_MS);
+  }
+
+  async function pollGames() {
+    try {
+      const resp = await fetch('/api/games');
+      const games = await resp.json();
+      if (Array.isArray(games)) {
+        // Clamp index if game list shrunk
+        if (state.currentIndex >= games.length) state.currentIndex = 0;
+        renderSchedule(games);
+      }
+    } catch (e) {
+      console.error("Schedule poll failed", e);
+    }
+    setTimeout(pollGames, 60000);
+  }
+
+  // Init
+  setInterval(updateClock, 1000);
+  updateClock();
+  loadSettings();
+  connectWs();
+  pollGames();
+
 </script>
 </body>
 </html>

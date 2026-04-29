@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
 from typing import Callable, Awaitable
 
 from tv_automator.config import Config
@@ -114,7 +117,7 @@ class GameScheduler:
 
     async def refresh(self) -> None:
         """Manually refresh all schedules."""
-        now = datetime.now()
+        now = datetime.now(_PACIFIC)
         for name, provider in self._providers.items():
             try:
                 games = await provider.get_schedule(now)
