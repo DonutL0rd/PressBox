@@ -93,10 +93,10 @@ const VideoCard: React.FC<{
       {/* Thumbnail */}
       <div className="yt-card-thumb">
         {thumbnail ? (
-          <img src={thumbnail} alt={title} loading="lazy" />
+          <img className="yt-card-img" src={thumbnail} alt={title} loading="lazy" />
         ) : (
           <div className="yt-thumb-fallback">
-            <Video size={36} color="var(--text-tertiary)" />
+            <Video size={36} color="var(--muted-foreground)" />
           </div>
         )}
 
@@ -197,7 +197,7 @@ const YtControls: React.FC<{ onStop: () => void }> = ({ onStop }) => {
         <span className="yt-ctrl-time">-{fmtDuration(Math.max(0, dur - seek))}</span>
       </div>
       <div className="yt-ctrl-row" style={{ justifyContent: 'center', gap: '12px' }}>
-        <select className="sc-select" value={speed} onChange={e => { const r = Number(e.target.value); setSpeed(r); cmd({ cmd: 'speed', rate: r }); }}>
+        <select className="setting-select" value={speed} onChange={e => { const r = Number(e.target.value); setSpeed(r); cmd({ cmd: 'speed', rate: r }); }}>
           <option value={0.5}>0.5x</option><option value={0.75}>0.75x</option><option value={1}>1x</option>
           <option value={1.25}>1.25x</option><option value={1.5}>1.5x</option><option value={2}>2x</option>
         </select>

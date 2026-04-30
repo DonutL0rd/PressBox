@@ -114,8 +114,8 @@ const NowPlayingBar: React.FC = React.memo(() => {
       <div className="npb-volume">
         <button className="btn-icon" onClick={toggleMute}>
           {localMuted || localVol === 0
-            ? <VolumeX size={18} color="var(--text-secondary)" />
-            : <Volume2 size={18} color="var(--text-secondary)" />}
+            ? <VolumeX size={18} color="var(--muted-foreground)" />
+            : <Volume2 size={18} color="var(--muted-foreground)" />}
         </button>
         <input type="range" className="volume-slider" min="0" max="100" value={localVol} onChange={handleVolumeChange} />
       </div>
