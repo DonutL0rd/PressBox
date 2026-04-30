@@ -8,8 +8,6 @@ from pathlib import Path
 
 import uvicorn
 
-from tv_automator.config import Config
-
 
 def setup_logging(data_dir: Path) -> None:
     log_dir = data_dir / "logs"
@@ -30,12 +28,9 @@ def setup_logging(data_dir: Path) -> None:
 
 
 def main() -> None:
-    config_path = None
-    if len(sys.argv) > 1:
-        config_path = Path(sys.argv[1])
-
-    config = Config(config_path=config_path)
-    setup_logging(config.data_dir)
+    import os
+    data_dir = Path(os.getenv("DATA_DIR", "/data"))
+    setup_logging(data_dir)
 
     log = logging.getLogger(__name__)
     log.info("Starting TV-Automator web server on port 5000...")

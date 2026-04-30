@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.1] — 2026-04-29
+
+### Changed
+- **Unified configuration** — eliminated the two-track config system (YAML file + UI settings). All runtime/behavioral settings are now managed exclusively through the web UI and persisted to `$DATA_DIR/settings.json`. Infrastructure settings (display resolution, browser binary, data path) go in `docker-compose.yml` or `.env`
+- **`docker-compose.yml`** — added commented optional env var block documenting `RESOLUTION`, `CHROME_PATH`, and credential overrides (`MLB_USERNAME/PASSWORD`, `NAVIDROME_URL/USERNAME/PASSWORD`)
+- **`.env.example`** — updated to reflect all supported env vars with inline comments; removed references to the config file
+- **`BrowserController`** — no longer accepts a `Config` argument; reads `RESOLUTION` and `CHROME_PATH` from env directly; Chrome flags hardcoded as module-level `_CHROME_FLAGS` constant
+- **`GameScheduler`** — now accepts `AppSettings` instead of `Config`
+
+### Removed
+- `config/default.yaml` — infrastructure settings migrated to docker-compose env vars; runtime settings migrated to the web UI
+- `src/tv_automator/config.py` — replaced by `src/tv_automator/settings.py`
+
+### New files
+- `src/tv_automator/settings.py` — `AppSettings` class; loads/saves flat JSON at `$DATA_DIR/settings.json` with typed convenience properties and env-var credential overrides
+
 ## [0.4.0] — 2026-04-28
 
 ### Added

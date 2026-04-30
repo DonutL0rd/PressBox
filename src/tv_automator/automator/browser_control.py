@@ -5,21 +5,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import TYPE_CHECKING
 
 from playwright.async_api import async_playwright, Playwright, Browser, Page
 
-if TYPE_CHECKING:
-    from tv_automator.config import Config
-
 log = logging.getLogger(__name__)
+
+_CHROME_FLAGS = [
+    "--kiosk",
+    "--no-first-run",
+    "--disable-infobars",
+    "--disable-session-crashed-bubble",
+    "--disable-features=TranslateUI",
+    "--autoplay-policy=no-user-gesture-required",
+]
 
 
 class BrowserController:
     """Launches and controls a Chrome window on the X11 display."""
 
-    def __init__(self, config: Config) -> None:
-        self._config = config
+    def __init__(self) -> None:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
@@ -29,8 +33,8 @@ class BrowserController:
         log.info("Starting browser controller...")
         self._playwright = await async_playwright().start()
 
-        res = self._config.display.get("resolution", "1920x1080")
-        args = list(self._config.chrome_args) + [
+        res = os.getenv("RESOLUTION", "1920x1080")
+        args = _CHROME_FLAGS + [
             "--no-sandbox",
             "--disable-gpu-sandbox",
             "--start-fullscreen",
@@ -52,7 +56,7 @@ class BrowserController:
             "headless": False,
         }
 
-        chrome_path = self._config.browser.get("chrome_path")
+        chrome_path = os.getenv("CHROME_PATH")
         if chrome_path:
             launch_kwargs["executable_path"] = chrome_path
 

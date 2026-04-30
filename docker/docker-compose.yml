@@ -33,6 +33,14 @@ services:
       - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - DATA_DIR=/data
       - TZ=America/Los_Angeles
+      # Optional overrides:
+      # - RESOLUTION=1920x1080       # Chrome window size (default: 1920x1080)
+      # - CHROME_PATH=/usr/bin/google-chrome  # Custom Chrome binary path
+      # - MLB_USERNAME=you@email.com  # MLB.TV credentials (or set in UI)
+      # - MLB_PASSWORD=yourpassword
+      # - NAVIDROME_URL=http://192.168.1.100:4533
+      # - NAVIDROME_USERNAME=admin
+      # - NAVIDROME_PASSWORD=yourpassword
 
     devices:
       - /dev/dri:/dev/dri

@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 
 from tv_automator.automator.browser_control import BrowserController
 from tv_automator.automator.cec_control import CECController
-from tv_automator.config import Config
+from tv_automator.settings import AppSettings
 from tv_automator.providers.base import Game, GameStatus, StreamingProvider
 from tv_automator.providers.mlb import MLBProvider, MLB_TEAMS
 from tv_automator.providers.mlb_session import MLBSession, StreamInfo
@@ -47,7 +47,7 @@ _YOUTUBE_HTML = (_TEMPLATE_DIR / "youtube.html").read_text()
 
 # ── App state ────────────────────────────────────────────────────
 
-_config: Config
+_settings: AppSettings
 _browser: BrowserController
 _cec: CECController
 _mlb: MLBProvider
@@ -94,13 +94,6 @@ _http_client: httpx.AsyncClient | None = None
 _last_music_broadcast: str = ""
 
 # ── Suggested YouTube channels ──────────────────────────────────
-# channel_id → display name
-SUGGESTED_CHANNELS: dict[str, str] = {
-    "UCsBjURrPoezykLs9EqgamOA": "Fireship",
-    "UCYO_jab_esuFRV4b17AJtAw": "3Blue1Brown",
-    "UCBJycsmduvYEL83R_U4JriQ": "MKBHD",
-    "UCKelCK4ZaO6HeEI1KQjqzWA": "AI Daily Brief",
-}
 _suggested_cache: dict[str, list[dict]] = {}
 _suggested_cache_time: float = 0
 SUGGESTED_CACHE_TTL = 1800  # 30 minutes
@@ -108,8 +101,12 @@ SUGGESTED_CACHE_TTL = 1800  # 30 minutes
 
 # ── Watch history helpers ────────────────────────────────────────
 
+def _data_dir() -> Path:
+    return Path(os.getenv("DATA_DIR", "/data"))
+
+
 def _history_path() -> Path:
-    return Path(_config.data_dir) / "watch_history.json"
+    return _data_dir() / "watch_history.json"
 
 
 def _load_history() -> None:
@@ -221,14 +218,14 @@ def _stop_progress_task() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _music_lock, _watchdog_task
-    _config = Config()
+    global _settings, _browser, _cec, _mlb, _session, _scheduler, _play_lock, _music_lock, _watchdog_task
+    _settings = AppSettings(_data_dir())
     _load_history()
-    _browser = BrowserController(_config)
-    _cec = CECController(enabled=_config.cec.get("enabled", False))
+    _browser = BrowserController()
+    _cec = CECController(enabled=_settings.get("cec_enabled", False))
     _mlb = MLBProvider()
     _session = MLBSession()
-    _scheduler = GameScheduler(_config)
+    _scheduler = GameScheduler(_settings)
     _scheduler.register_provider(_mlb)
     _scheduler.set_on_refresh(_on_schedule_refresh)
     _play_lock = asyncio.Lock()
@@ -242,7 +239,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("Browser failed to start — check DISPLAY / X11")
 
-    creds = _config.mlb_credentials
+    creds = _settings.mlb_credentials
     if creds:
         username, password = creds
         log.info("MLB credentials found — logging in via API...")
@@ -413,7 +410,7 @@ async def _auto_start_game(provider: StreamingProvider, game: Game) -> None:
             return
 
         # Determine feed: use the favorite team's feed
-        fav_teams = {t.upper() for t in _config.favorite_teams}
+        fav_teams = {t.upper() for t in _settings.favorite_teams}
         if game.home_team.abbreviation.upper() in fav_teams:
             feed = "HOME"
         elif game.away_team.abbreviation.upper() in fav_teams:
@@ -747,7 +744,7 @@ async def _do_stop() -> None:
         await _browser.navigate("http://127.0.0.1:5000/screensaver")
 
     # CEC: power off TV
-    if _cec.enabled and _config.cec.get("power_off_on_stop", True):
+    if _cec.enabled and _settings.get("cec_power_off_on_stop", True):
         await _cec.power_off()
 
     await _broadcast_status()
@@ -980,7 +977,7 @@ async def get_suggested_videos():
 
     results: dict[str, list[dict]] = {}
     async with httpx.AsyncClient(timeout=10) as client:
-        for channel_id, channel_name in SUGGESTED_CHANNELS.items():
+        for channel_id, channel_name in _settings.get("suggested_channels", {}).items():
             try:
                 url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
                 resp = await client.get(url)
@@ -1689,53 +1686,28 @@ async def get_teams():
 
 @app.get("/api/favorites")
 async def get_favorites():
-    return {"teams": _config.favorite_teams}
+    return {"teams": _settings.favorite_teams}
 
 
 @app.post("/api/favorites")
 async def set_favorites(body: dict):
     teams = body.get("teams", [])
-    _config.update_nested("providers", "mlb", "favorite_teams", value=teams)
-    _config.save_user_config()
+    _settings.set("favorite_teams", teams)
+    _settings.save()
     log.info("Favorites updated: %s", teams)
     return {"teams": teams}
 
 
 @app.get("/api/settings")
 async def get_settings():
-    overlay = _config.get("overlay", {})
-    sched = _config.scheduler
-    display = _config.display
     return {
-        # Account
-        "mlb_username": _config.mlb_username or "",
+        **_settings.public_dict(),
+        # Derived fields not stored in settings
         "mlb_authenticated": _session.is_authenticated,
-        # Playback
-        "auto_start": _config.auto_start,
-        "default_feed": _config.get("providers", {}).get("mlb", {}).get("default_feed", "HOME"),
-        # Overlay
-        "strike_zone_enabled": overlay.get("strike_zone_enabled", True),
-        "strike_zone_size": overlay.get("strike_zone_size", "medium"),
-        "batter_intel_enabled": overlay.get("batter_intel_enabled", True),
-        "between_innings_enabled": overlay.get("between_innings_enabled", True),
-        "overlay_delay": overlay.get("overlay_delay", 2),
-        # Display
-        "resolution": display.get("resolution", "1920x1080"),
-        "fullscreen": display.get("fullscreen", True),
-        # Scheduler
-        "poll_interval": sched.get("poll_interval", 60),
-        "pre_game_minutes": sched.get("pre_game_minutes", 5),
-        # CEC
-        "cec_enabled": _config.cec.get("enabled", False),
-        "cec_power_off_on_stop": _config.cec.get("power_off_on_stop", True),
-        # YouTube channels
-        "suggested_channels": {cid: name for cid, name in SUGGESTED_CHANNELS.items()},
-        # Screensaver
-        "screensaver_music_size": _config.get("screensaver", {}).get("music_size", "medium"),
-        "screensaver_schedule_scale": _config.get("screensaver", {}).get("schedule_scale", 100),
-        # Navidrome
-        "navidrome_server_url": os.getenv("NAVIDROME_URL") or _config.get("navidrome", {}).get("server_url", ""),
-        "navidrome_username": os.getenv("NAVIDROME_USERNAME") or _config.get("navidrome", {}).get("username", ""),
+        # Env-var overrides for display-only (credentials still override at read time)
+        "navidrome_server_url": os.getenv("NAVIDROME_URL") or _settings.get("navidrome_server_url", ""),
+        "navidrome_username": os.getenv("NAVIDROME_USERNAME") or _settings.get("navidrome_username", ""),
+        "mlb_username": os.getenv("MLB_USERNAME") or _settings.get("mlb_username", ""),
     }
 
 
@@ -1770,59 +1742,49 @@ async def set_autoplay(body: dict):
 
 @app.post("/api/settings")
 async def update_settings(body: dict):
+    patch: dict = {}
     # Playback
     if "auto_start" in body:
-        _config.update_nested("providers", "mlb", "auto_start", value=body["auto_start"])
+        patch["auto_start"] = bool(body["auto_start"])
     if "default_feed" in body:
-        feed = body["default_feed"].upper() if body["default_feed"] in ("HOME", "AWAY") else "HOME"
-        _config.update_nested("providers", "mlb", "default_feed", value=feed)
+        patch["default_feed"] = body["default_feed"].upper() if body["default_feed"] in ("HOME", "AWAY") else "HOME"
     # Overlay
     if "strike_zone_enabled" in body:
-        _config.update_nested("overlay", "strike_zone_enabled", value=body["strike_zone_enabled"])
+        patch["strike_zone_enabled"] = bool(body["strike_zone_enabled"])
     if "strike_zone_size" in body:
-        allowed = ("small", "medium", "large")
-        sz = body["strike_zone_size"] if body["strike_zone_size"] in allowed else "medium"
-        _config.update_nested("overlay", "strike_zone_size", value=sz)
+        patch["strike_zone_size"] = body["strike_zone_size"] if body["strike_zone_size"] in ("small", "medium", "large") else "medium"
     if "batter_intel_enabled" in body:
-        _config.update_nested("overlay", "batter_intel_enabled", value=body["batter_intel_enabled"])
+        patch["batter_intel_enabled"] = bool(body["batter_intel_enabled"])
     if "between_innings_enabled" in body:
-        _config.update_nested("overlay", "between_innings_enabled", value=body["between_innings_enabled"])
+        patch["between_innings_enabled"] = bool(body["between_innings_enabled"])
     if "overlay_delay" in body:
-        val = max(0, min(15, float(body["overlay_delay"])))
-        _config.update_nested("overlay", "overlay_delay", value=val)
-    # Display
-    if "resolution" in body:
-        _config.update_nested("display", "resolution", value=body["resolution"])
-    if "fullscreen" in body:
-        _config.update_nested("display", "fullscreen", value=body["fullscreen"])
+        patch["overlay_delay"] = max(0, min(15, float(body["overlay_delay"])))
     # Scheduler
     if "poll_interval" in body:
-        val = max(15, min(300, int(body["poll_interval"])))
-        _config.update_nested("scheduler", "poll_interval", value=val)
+        patch["poll_interval"] = max(15, min(300, int(body["poll_interval"])))
     if "pre_game_minutes" in body:
-        val = max(0, min(30, int(body["pre_game_minutes"])))
-        _config.update_nested("scheduler", "pre_game_minutes", value=val)
+        patch["pre_game_minutes"] = max(0, min(30, int(body["pre_game_minutes"])))
     # CEC
     if "cec_enabled" in body:
-        _config.update_nested("cec", "enabled", value=body["cec_enabled"])
+        patch["cec_enabled"] = bool(body["cec_enabled"])
         _cec._enabled = body["cec_enabled"]
     if "cec_power_off_on_stop" in body:
-        _config.update_nested("cec", "power_off_on_stop", value=body["cec_power_off_on_stop"])
+        patch["cec_power_off_on_stop"] = bool(body["cec_power_off_on_stop"])
     # YouTube channels
     if "suggested_channels" in body:
-        SUGGESTED_CHANNELS.clear()
-        SUGGESTED_CHANNELS.update(body["suggested_channels"])
-        _config.update_nested("youtube", "suggested_channels", value=body["suggested_channels"])
+        patch["suggested_channels"] = body["suggested_channels"]
+        # Bust cache so the new channels are fetched immediately
+        global _suggested_cache_time
+        _suggested_cache_time = 0
     # Screensaver
     if "screensaver_music_size" in body:
-        allowed = ("small", "medium", "large")
-        sz = body["screensaver_music_size"] if body["screensaver_music_size"] in allowed else "medium"
-        _config.update_nested("screensaver", "music_size", value=sz)
+        patch["screensaver_music_size"] = body["screensaver_music_size"] if body["screensaver_music_size"] in ("small", "medium", "large") else "medium"
     if "screensaver_schedule_scale" in body:
-        val = max(50, min(200, int(body["screensaver_schedule_scale"])))
-        _config.update_nested("screensaver", "schedule_scale", value=val)
-    _config.save_user_config()
-    log.info("Settings updated: %s", {k: v for k, v in body.items() if k != "mlb_password"})
+        patch["screensaver_schedule_scale"] = max(50, min(200, int(body["screensaver_schedule_scale"])))
+
+    _settings.update(patch)
+    _settings.save()
+    log.info("Settings updated: %s", list(patch.keys()))
     await _broadcast_settings()
     return await get_settings()
 
@@ -1840,9 +1802,8 @@ async def update_credentials(body: dict):
     ok = await _session.login(username, password)
 
     if ok:
-        _config.update_nested("providers", "mlb", "username", value=username)
-        _config.update_nested("providers", "mlb", "password", value=password)
-        _config.save_user_config()
+        _settings.update({"mlb_username": username, "mlb_password": password})
+        _settings.save()
         log.info("Credentials updated and login successful for %s", username)
         # Refresh the schedule right away so the Dashboard sees games immediately
         # instead of waiting for the next poll cycle.
@@ -1894,7 +1855,7 @@ _music_shuffle_order: list[int] = []
 
 def _subsonic_params() -> dict[str, str] | None:
     """Build Subsonic API auth query params. Returns None if not configured."""
-    creds = _config.navidrome_credentials
+    creds = _settings.navidrome_credentials
     if not creds:
         return None
     _server_url, username, password = creds
@@ -1917,7 +1878,7 @@ def _subsonic_stream_url(song_id: str) -> str | None:
         return None
     params["id"] = song_id
     params.pop("f", None)
-    server_url = _config.navidrome_credentials[0].rstrip("/")
+    server_url = _settings.navidrome_credentials[0].rstrip("/")
     qs = "&".join(f"{k}={v}" for k, v in params.items())
     return f"{server_url}/rest/stream?{qs}"
 
@@ -1929,7 +1890,7 @@ async def _navidrome_api(endpoint: str, extra_params: dict | None = None) -> dic
         raise HTTPException(503, "Navidrome not configured")
     if extra_params:
         params.update(extra_params)
-    server_url = _config.navidrome_credentials[0].rstrip("/")
+    server_url = _settings.navidrome_credentials[0].rstrip("/")
     url = f"{server_url}{endpoint}"
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url, params=params)
@@ -2134,10 +2095,8 @@ async def music_credentials(body: dict):
     password = body.get("password", "").strip()
     if not server_url or not username or not password:
         raise HTTPException(400, "All fields are required")
-    _config.update_nested("navidrome", "server_url", value=server_url)
-    _config.update_nested("navidrome", "username", value=username)
-    _config.update_nested("navidrome", "password", value=password)
-    _config.save_user_config()
+    _settings.update({"navidrome_server_url": server_url, "navidrome_username": username, "navidrome_password": password})
+    _settings.save()
     try:
         resp = await _navidrome_api("/rest/ping")
         log.info("Navidrome connected: %s@%s", username, server_url)
@@ -2210,7 +2169,7 @@ async def music_cover(item_id: str, size: int = 300):
     params["id"] = item_id
     params["size"] = str(size)
     params.pop("f", None)
-    server_url = _config.navidrome_credentials[0].rstrip("/")
+    server_url = _settings.navidrome_credentials[0].rstrip("/")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(f"{server_url}/rest/getCoverArt", params=params)
     if r.status_code != 200:

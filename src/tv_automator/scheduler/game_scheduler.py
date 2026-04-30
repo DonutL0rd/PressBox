@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 from typing import Callable, Awaitable
 
-from tv_automator.config import Config
+from tv_automator.settings import AppSettings
 from tv_automator.providers.base import Game, GameStatus, StreamingProvider
 
 log = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class GameScheduler:
     - Provide the current schedule to the web dashboard
     """
 
-    def __init__(self, config: Config) -> None:
-        self._config = config
+    def __init__(self, settings: AppSettings) -> None:
+        self._settings = settings
         self._providers: dict[str, StreamingProvider] = {}
         self._schedules: dict[str, list[Game]] = {}  # provider_name → games
         self._poll_task: asyncio.Task | None = None
@@ -98,7 +98,7 @@ class GameScheduler:
 
     async def start(self) -> None:
         """Start the polling loop."""
-        log.info("Starting game scheduler (poll interval: %ds)", self._config.poll_interval)
+        log.info("Starting game scheduler (poll interval: %ds)", self._settings.poll_interval)
         # Do an initial fetch
         await self.refresh()
         # Start the background polling loop
@@ -141,7 +141,7 @@ class GameScheduler:
         """Background loop that periodically refreshes schedules."""
         while True:
             try:
-                await asyncio.sleep(self._config.poll_interval)
+                await asyncio.sleep(self._settings.poll_interval)
                 await self.refresh()
                 await self._check_auto_start()
             except asyncio.CancelledError:
@@ -151,10 +151,10 @@ class GameScheduler:
 
     async def _check_auto_start(self) -> None:
         """Check if any favorite team games have gone live and should auto-start."""
-        if not self._config.auto_start or not self._auto_start_callback:
+        if not self._settings.auto_start or not self._auto_start_callback:
             return
 
-        favorite_teams = {t.upper() for t in self._config.favorite_teams}
+        favorite_teams = {t.upper() for t in self._settings.favorite_teams}
         if not favorite_teams:
             return
 
