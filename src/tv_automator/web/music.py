@@ -15,6 +15,7 @@ import os
 import random
 import secrets
 from typing import TYPE_CHECKING
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
@@ -77,8 +78,7 @@ def _subsonic_stream_url(song_id: str) -> str | None:
     params["id"] = song_id
     params.pop("f", None)
     server_url = _ctx.settings.navidrome_credentials[0].rstrip("/")
-    qs = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"{server_url}/rest/stream?{qs}"
+    return f"{server_url}/rest/stream?{urlencode(params)}"
 
 
 async def _navidrome_api(endpoint: str, extra_params: dict | None = None) -> dict:
@@ -439,7 +439,8 @@ async def music_play(body: dict):
     index = body.get("index", 0)
     if not songs:
         raise HTTPException(400, "No songs provided")
-    await _ctx.stop_video_for_music()
+    async with _ctx.play_lock:
+        await _ctx.stop_video_for_music()
     async with _music_lock:
         _music_queue[:] = [
             {
@@ -630,7 +631,8 @@ async def music_queue_append(body: dict):
             need_start = True
             _music_queue_index = 0
     if need_start:
-        await _ctx.stop_video_for_music()
+        async with _ctx.play_lock:
+            await _ctx.stop_video_for_music()
         async with _music_lock:
             await _music_play_current()
             _music_start_watcher()

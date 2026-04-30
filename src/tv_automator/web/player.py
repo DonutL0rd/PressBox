@@ -287,6 +287,7 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
                     asyncio.create_task(_reconnect_with_retry())
                 return None
             info = StreamInfo(url=url, direct=True)
+            _stream_info = info
         else:
             info = await _ctx.session.get_stream_info(_now_playing_game_id, _now_playing_feed)
             if not info:
@@ -298,10 +299,9 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
                 if schedule_retry:
                     asyncio.create_task(_reconnect_with_retry())
                 return None
+            _stream_info = info
             start_heartbeat()
             start_expiry_timer()
-
-        _stream_info = info
         await _ctx.browser.navigate("http://127.0.0.1:5000/player")
         log.info("Reconnected successfully")
         return info

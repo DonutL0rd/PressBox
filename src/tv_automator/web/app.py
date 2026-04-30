@@ -100,7 +100,7 @@ async def _broadcast(message: dict) -> None:
         return
     data = json.dumps(message)
     dead: list[WebSocket] = []
-    for client in _ws_clients:
+    for client in list(_ws_clients):
         try:
             await client.send_text(data)
         except Exception:
@@ -997,7 +997,7 @@ async def update_settings(body: dict):
         patch["cec_power_off_on_stop"] = bool(body["cec_power_off_on_stop"])
     if "suggested_channels" in body:
         patch["suggested_channels"] = body["suggested_channels"]
-        youtube._suggested_cache_time = 0
+        youtube.invalidate_suggested_cache()
     if "screensaver_music_size" in body:
         patch["screensaver_music_size"] = body["screensaver_music_size"] if body["screensaver_music_size"] in ("small", "medium", "large") else "medium"
     if "screensaver_schedule_scale" in body:

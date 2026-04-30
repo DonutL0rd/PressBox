@@ -51,6 +51,12 @@ def init(ctx: AppContext) -> None:
     load_history()
 
 
+def invalidate_suggested_cache() -> None:
+    """Reset the suggested-channels cache so the next request re-fetches."""
+    global _suggested_cache_time
+    _suggested_cache_time = 0
+
+
 # ── Watch history helpers ─────────────────────────────────────────
 
 def _data_dir() -> Path:

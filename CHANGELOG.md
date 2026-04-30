@@ -3,7 +3,7 @@
 ## [0.4.2] — 2026-04-29
 
 ### Added
-- **Condensed game replays** — `do_play_condensed()` fetches a condensed game HLS/MP4 URL from the public MLB Stats API (no auth required) and plays it directly in the browser player. Automatically used as a fallback when a live stream reconnect fails after retries
+- **Condensed game replays** — `do_play_condensed()` fetches a condensed game HLS/MP4 URL from the public MLB Stats API (no auth required) and plays it directly in the browser player
 
 ### Changed
 - **`app.py` modularized** — player, music, and YouTube logic extracted into dedicated submodules (`web/player.py`, `web/music.py`, `web/youtube.py`). `app.py` now wires them together via a shared `AppContext` dataclass rather than a flat namespace of globals
