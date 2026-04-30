@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.2] — 2026-04-29
+
+### Added
+- **Condensed game replays** — `do_play_condensed()` fetches a condensed game HLS/MP4 URL from the public MLB Stats API (no auth required) and plays it directly in the browser player
+
+### Changed
+- **`app.py` modularized** — player, music, and YouTube logic extracted into dedicated submodules (`web/player.py`, `web/music.py`, `web/youtube.py`). `app.py` now wires them together via a shared `AppContext` dataclass rather than a flat namespace of globals
+- **`AppContext` dataclass** — introduced to pass shared state and async callbacks (broadcast, stop, play-lock) into submodules at startup without circular imports
+
+### New files
+- `src/tv_automator/web/player.py` — MLB stream playback, heartbeat loop, token expiry timer, HLS proxy, player command queue, reconnect logic (432 lines)
+- `src/tv_automator/web/music.py` — Subsonic/Navidrome music API, mpv process management, queue/shuffle/watcher, all music HTTP endpoints (684 lines)
+- `src/tv_automator/web/youtube.py` — YouTube playback, watch history, suggested videos, progress persistence, all YouTube HTTP endpoints (377 lines)
+
 ## [0.4.1] — 2026-04-29
 
 ### Changed

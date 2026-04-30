@@ -63,7 +63,6 @@ RUN pip install --no-cache-dir playwright \
 COPY src/ /app/src/
 # Copy the built React assets from the node buider stage
 COPY --from=frontend-builder /app/frontend/dist/ /app/src/tv_automator/web/frontend/dist/
-COPY config/ /app/config/
 
 RUN pip install --no-cache-dir -e .
 
