@@ -30,3 +30,8 @@ tv-automator = "tv_automator.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tv_automator"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
