@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_SCREENSAVER_URL = "http://127.0.0.1:5000/screensaver"
+_PLAYER_URL = "http://127.0.0.1:5000/player"
+
 # ── Module state ─────────────────────────────────────────────────
 
 _ctx: AppContext  # set by init()
@@ -226,7 +229,7 @@ async def do_play_condensed(game_id: str) -> StreamInfo:
         await _ctx.browser.start()
         set_browser_started_at(time.monotonic())
 
-    ok = await _ctx.browser.navigate("http://127.0.0.1:5000/player")
+    ok = await _ctx.browser.navigate(_PLAYER_URL)
     if not ok:
         raise HTTPException(503, "Failed to navigate browser to player")
 
@@ -255,7 +258,7 @@ async def do_play(game_id: str, feed: str) -> StreamInfo:
         await _ctx.cec.power_on()
         await _ctx.cec.set_active_source()
 
-    ok = await _ctx.browser.navigate("http://127.0.0.1:5000/player")
+    ok = await _ctx.browser.navigate(_PLAYER_URL)
     if not ok:
         raise HTTPException(503, "Failed to navigate browser to player")
 
@@ -302,7 +305,7 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
             _stream_info = info
             start_heartbeat()
             start_expiry_timer()
-        await _ctx.browser.navigate("http://127.0.0.1:5000/player")
+        await _ctx.browser.navigate(_PLAYER_URL)
         log.info("Reconnected successfully")
         return info
     except Exception:
@@ -316,10 +319,13 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
         return None
 
 
+_RECONNECT_DELAYS = [10, 20, 30]  # seconds — quick first retry, then back off
+
+
 async def _reconnect_with_retry() -> None:
-    """Retry do_reconnect up to 3 times with 30-second delays."""
-    for attempt in range(1, 4):
-        await asyncio.sleep(30)
+    """Retry do_reconnect up to 3 times with increasing delays."""
+    for attempt, wait in enumerate(_RECONNECT_DELAYS, 1):
+        await asyncio.sleep(wait)
         if not _now_playing_game_id:
             return
         log.info("Reconnect retry %d/3 for game %s…", attempt, _now_playing_game_id)

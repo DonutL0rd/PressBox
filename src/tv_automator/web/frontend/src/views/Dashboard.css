@@ -30,6 +30,12 @@
   text-align: center;
 }
 
+.dash-autostart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .dash-filters {
   display: flex;
   gap: 6px;

@@ -67,6 +67,14 @@ export interface StreamAlert {
   id: number;
 }
 
+export interface AutoplayState {
+  queued: boolean;
+  game_id: string | null;
+  feed: string | null;
+  display_matchup: string | null;
+  display_time: string | null;
+}
+
 interface TvAutomatorContextType {
   games: Game[];
   status: Status;
@@ -74,12 +82,15 @@ interface TvAutomatorContextType {
   music: MusicStatus;
   volume: VolumeState;
   queue: QueueState;
+  autoplay: AutoplayState;
   connected: boolean;
   alert: StreamAlert | null;
   clearAlert: () => void;
   showAlert: (message: string, level?: 'error' | 'info') => void;
   playGame: (gameId: string, feed?: string) => Promise<void>;
   stopPlayback: () => Promise<void>;
+  queueGame: (gameId: string, feed?: string) => Promise<void>;
+  dequeueGame: () => Promise<void>;
   playYoutube: (url: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
   refreshGames: () => Promise<void>;
@@ -124,6 +135,7 @@ const defaultMusic: MusicStatus = {
 
 const defaultVolume: VolumeState = { volume: 50, muted: false };
 const defaultQueue: QueueState = { songs: [], index: -1 };
+const defaultAutoplay: AutoplayState = { queued: false, game_id: null, feed: null, display_matchup: null, display_time: null };
 
 // ── Context ─────────────────────────────────────────────────────
 
@@ -136,6 +148,7 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [music, setMusic] = useState<MusicStatus>(defaultMusic);
   const [volume, setVolume] = useState<VolumeState>(defaultVolume);
   const [queue, setQueue] = useState<QueueState>(defaultQueue);
+  const [autoplay, setAutoplay] = useState<AutoplayState>(defaultAutoplay);
   const [connected, setConnected] = useState(false);
   const [alert, setAlert] = useState<StreamAlert | null>(null);
   const alertIdRef = useRef(0);
@@ -194,6 +207,13 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
     // Initial REST fetch as safety net
     refreshStatus();
     refreshGames();
+    fetch('/api/autoplay').then(r => r.ok ? r.json() : defaultAutoplay).then(d => setAutoplay({
+      queued: d.queued ?? false,
+      game_id: d.game_id ?? null,
+      feed: d.feed ?? null,
+      display_matchup: d.display_matchup ?? null,
+      display_time: d.display_time ?? null,
+    })).catch(() => {});
 
     const connect = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -256,7 +276,13 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
               });
               break;
             case 'autoplay':
-              // Handled by views that need it
+              setAutoplay({
+                queued: data.queued ?? false,
+                game_id: data.game_id ?? null,
+                feed: data.feed ?? null,
+                display_matchup: data.display_matchup ?? null,
+                display_time: data.display_time ?? null,
+              });
               break;
             case 'error':
             case 'info':
@@ -313,6 +339,31 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
     } catch {}
   }, []);
 
+  const queueGame = useCallback(async (gameId: string, feed: string = 'HOME') => {
+    try {
+      const r = await fetch('/api/autoplay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId, feed }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setAutoplay({ queued: d.queued ?? true, game_id: d.game_id ?? gameId, feed: d.feed ?? feed, display_matchup: d.display_matchup ?? null, display_time: d.display_time ?? null });
+      }
+    } catch {}
+  }, []);
+
+  const dequeueGame = useCallback(async () => {
+    try {
+      await fetch('/api/autoplay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: null }),
+      });
+      setAutoplay(defaultAutoplay);
+    } catch {}
+  }, []);
+
   const playYoutube = useCallback(async (url: string) => {
     try {
       await fetch('/api/youtube', {
@@ -324,11 +375,11 @@ export const TvAutomatorProvider: React.FC<{ children: ReactNode }> = ({ childre
   }, []);
 
   const value = useMemo(() => ({
-    games, status, settings, music, volume, queue, connected,
+    games, status, settings, music, volume, queue, autoplay, connected,
     alert, clearAlert, showAlert,
-    playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting,
-  }), [games, status, settings, music, volume, queue, connected, alert,
-       clearAlert, showAlert, playGame, stopPlayback, playYoutube, refreshStatus, refreshGames, updateSetting]);
+    playGame, stopPlayback, queueGame, dequeueGame, playYoutube, refreshStatus, refreshGames, updateSetting,
+  }), [games, status, settings, music, volume, queue, autoplay, connected, alert,
+       clearAlert, showAlert, playGame, stopPlayback, queueGame, dequeueGame, playYoutube, refreshStatus, refreshGames, updateSetting]);
 
   return (
     <TvAutomatorContext.Provider value={value}>

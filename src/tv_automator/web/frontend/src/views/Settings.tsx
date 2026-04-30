@@ -1,6 +1,39 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save, Video, Trash2, Plus, HelpCircle } from 'lucide-react';
+import { Settings as SettingsIcon, PlaySquare, Music, MonitorPlay, Save, Video, Trash2, Plus, HelpCircle, Star } from 'lucide-react';
+
+const MLB_TEAMS = [
+  { abbr: 'ARI', name: 'Arizona Diamondbacks' },
+  { abbr: 'ATL', name: 'Atlanta Braves' },
+  { abbr: 'BAL', name: 'Baltimore Orioles' },
+  { abbr: 'BOS', name: 'Boston Red Sox' },
+  { abbr: 'CHC', name: 'Chicago Cubs' },
+  { abbr: 'CWS', name: 'Chicago White Sox' },
+  { abbr: 'CIN', name: 'Cincinnati Reds' },
+  { abbr: 'CLE', name: 'Cleveland Guardians' },
+  { abbr: 'COL', name: 'Colorado Rockies' },
+  { abbr: 'DET', name: 'Detroit Tigers' },
+  { abbr: 'HOU', name: 'Houston Astros' },
+  { abbr: 'KC',  name: 'Kansas City Royals' },
+  { abbr: 'LAA', name: 'Los Angeles Angels' },
+  { abbr: 'LAD', name: 'Los Angeles Dodgers' },
+  { abbr: 'MIA', name: 'Miami Marlins' },
+  { abbr: 'MIL', name: 'Milwaukee Brewers' },
+  { abbr: 'MIN', name: 'Minnesota Twins' },
+  { abbr: 'NYM', name: 'New York Mets' },
+  { abbr: 'NYY', name: 'New York Yankees' },
+  { abbr: 'OAK', name: 'Oakland Athletics' },
+  { abbr: 'PHI', name: 'Philadelphia Phillies' },
+  { abbr: 'PIT', name: 'Pittsburgh Pirates' },
+  { abbr: 'SD',  name: 'San Diego Padres' },
+  { abbr: 'SF',  name: 'San Francisco Giants' },
+  { abbr: 'SEA', name: 'Seattle Mariners' },
+  { abbr: 'STL', name: 'St. Louis Cardinals' },
+  { abbr: 'TB',  name: 'Tampa Bay Rays' },
+  { abbr: 'TEX', name: 'Texas Rangers' },
+  { abbr: 'TOR', name: 'Toronto Blue Jays' },
+  { abbr: 'WSH', name: 'Washington Nationals' },
+];
 import { useTvAutomator } from '../hooks/useTvAutomator';
 import './Settings.css';
 
@@ -150,6 +183,53 @@ const Settings: React.FC = () => {
               <Save size={16} /> Save & Authenticate
             </button>
           </form>
+        </div>
+
+        {/* FAVORITE TEAMS */}
+        <div className="settings-card" style={{gridColumn: '1 / -1'}}>
+          <div className="settings-card-header">
+            <Star size={20} color="var(--accent)" />
+            <h2 className="settings-card-title">Favorite Teams</h2>
+          </div>
+          <div style={{fontSize: '0.8rem', color: 'var(--text-tertiary)', marginBottom: '12px'}}>
+            Auto Start will use these teams to pick the right broadcast feed. Games with your favorites go live first.
+          </div>
+          <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px'}}>
+            {MLB_TEAMS.map(team => {
+              const favs: string[] = settings.favorite_teams || [];
+              const isFav = favs.includes(team.abbr);
+              return (
+                <button
+                  key={team.abbr}
+                  title={team.name}
+                  onClick={() => {
+                    const next = isFav
+                      ? favs.filter(t => t !== team.abbr)
+                      : [...favs, team.abbr];
+                    updateSetting({ favorite_teams: next });
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${isFav ? 'var(--accent)' : 'var(--border-subtle)'}`,
+                    background: isFav ? 'var(--accent-dim)' : 'transparent',
+                    color: isFav ? 'var(--accent)' : 'var(--text-secondary)',
+                    fontWeight: isFav ? 700 : 500,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {team.abbr}
+                </button>
+              );
+            })}
+          </div>
+          {((settings.favorite_teams || []) as string[]).length > 0 && (
+            <div style={{marginTop: '10px', fontSize: '0.78rem', color: 'var(--text-tertiary)'}}>
+              {((settings.favorite_teams || []) as string[]).length} team{((settings.favorite_teams || []) as string[]).length !== 1 ? 's' : ''} selected
+            </div>
+          )}
         </div>
 
         {/* NAVIDROME */}

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTvAutomator, type Game } from '../hooks/useTvAutomator';
-import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity, Layers, Monitor, Subtitles, Power } from 'lucide-react';
+import { Play, Tv, ChevronLeft, ChevronRight, AlertTriangle, MapPin, Activity, Layers, Monitor, Subtitles, Power, StopCircle, Clock } from 'lucide-react';
 import './Dashboard.css';
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -172,8 +172,11 @@ const StreamControls: React.FC = () => {
 const GameDetailPanel: React.FC<{
   game: Game;
   isPlaying: boolean;
+  isQueued: boolean;
   onPlay: (gameId: string, feed: string) => void;
-}> = ({ game, isPlaying, onPlay }) => {
+  onQueue: (gameId: string, feed: string) => void;
+  onDequeue: () => void;
+}> = ({ game, isPlaying, isQueued, onPlay, onQueue, onDequeue }) => {
   const [stats, setStats] = useState<GameStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -269,6 +272,31 @@ const GameDetailPanel: React.FC<{
             >
               <Play size={14} /> Watch Recap
             </button>
+          </div>
+        )}
+
+        {/* Queue — for scheduled/pre-game games not yet watchable */}
+        {!game.is_watchable && (game.status === 'scheduled' || game.status === 'pre_game') && (
+          <div className="detail-play-row">
+            {isQueued ? (
+              <>
+                <span style={{ fontSize: '0.8rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Clock size={13} /> Queued — will auto-start when live
+                </span>
+                <button className="btn" onClick={onDequeue} style={{ fontSize: '0.78rem', padding: '4px 10px' }}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-accent" onClick={() => onQueue(game.game_id, 'HOME')}>
+                  <Clock size={14} /> Queue Home
+                </button>
+                <button className="btn" onClick={() => onQueue(game.game_id, 'AWAY')}>
+                  Queue Away
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -422,7 +450,7 @@ const BattingRow: React.FC<{ team: string; s: any }> = ({ team, s }) => (
 // ── Main Dashboard ───────────────────────────────────────────
 
 const Dashboard: React.FC = () => {
-  const { games: todayGames, status, playGame, refreshGames } = useTvAutomator();
+  const { games: todayGames, status, playGame, stopPlayback, queueGame, dequeueGame, refreshGames, settings, updateSetting, autoplay } = useTvAutomator();
 
   const [date, setDate] = useState<Date>(() => {
     const d = new Date();
@@ -502,6 +530,23 @@ const Dashboard: React.FC = () => {
           )}
         </div>
 
+        <div className="dash-autostart">
+          {status.now_playing_game_id && (
+            <button
+              className="btn"
+              onClick={stopPlayback}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.4)' }}
+            >
+              <StopCircle size={14} /> Stop
+            </button>
+          )}
+          <span className="sc-label" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Auto Start</span>
+          <label className="switch">
+            <input type="checkbox" checked={!!settings.auto_start} onChange={e => updateSetting({ auto_start: e.target.checked })} />
+            <span className="slider"></span>
+          </label>
+        </div>
+
         <div className="dash-filters">
           <button className={`filter-pill ${filter==='all'?'active':''}`} onClick={() => setFilter('all')}>
             All <span className="pill-count">{games.length}</span>
@@ -554,7 +599,10 @@ const Dashboard: React.FC = () => {
             <GameDetailPanel
               game={selectedGame}
               isPlaying={status.now_playing_game_id === selectedGame.game_id}
+              isQueued={autoplay.queued && autoplay.game_id === selectedGame.game_id}
               onPlay={playGame}
+              onQueue={queueGame}
+              onDequeue={dequeueGame}
             />
           ) : (
             <div className="dash-empty dash-empty--lg">

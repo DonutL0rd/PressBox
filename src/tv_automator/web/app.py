@@ -29,7 +29,7 @@ from tv_automator.providers.mlb import MLBProvider, MLB_TEAMS
 from tv_automator.providers.mlb_session import MLBSession
 from tv_automator.scheduler.game_scheduler import GameScheduler
 
-from tv_automator.web import music, player, youtube
+from tv_automator.web import music, pitch_data, player, youtube
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ _SCREENSAVER_HTML = (_TEMPLATE_DIR / "screensaver.html").read_text()
 _YOUTUBE_HTML = (_TEMPLATE_DIR / "youtube.html").read_text()
 
 _PACIFIC = ZoneInfo("America/Los_Angeles")
+
+# ── Internal page URLs ────────────────────────────────────────────
+_BASE_URL = "http://127.0.0.1:5000"
+_SCREENSAVER_URL = f"{_BASE_URL}/screensaver"
+_PLAYER_URL = f"{_BASE_URL}/player"
 
 # ── App state ────────────────────────────────────────────────────
 
@@ -60,6 +65,7 @@ _last_games_hash: str = ""
 
 _last_batter_id: int | None = None
 _batter_vs_pitcher_cache: dict[tuple[int, int], dict | None] = {}
+_BATTER_CACHE_MAX = 500  # ~5 full rotations worth of matchups; evict oldest when exceeded
 _other_scores_cache: list[dict] = []
 _other_scores_cache_time: float = 0
 OTHER_SCORES_TTL = 30
@@ -154,7 +160,7 @@ async def _do_stop() -> None:
     youtube.clear_youtube_state()
 
     if _browser.is_running:
-        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+        await _browser.navigate(_SCREENSAVER_URL)
 
     if _cec.enabled and _settings.get("cec_power_off_on_stop", True):
         await _cec.power_off()
@@ -177,7 +183,7 @@ async def _stop_video_for_music() -> None:
     youtube.clear_youtube_state()
 
     if was_playing and _browser.is_running:
-        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+        await _browser.navigate(_SCREENSAVER_URL)
 
     if was_playing:
         await _broadcast_status()
@@ -267,7 +273,7 @@ app.include_router(player.router)
 async def _initial_navigate() -> None:
     for _ in range(20):
         await asyncio.sleep(0.5)
-        if await _browser.navigate("http://127.0.0.1:5000/screensaver"):
+        if await _browser.navigate(_SCREENSAVER_URL):
             return
     log.warning("Initial screensaver navigation failed after retries")
 
@@ -284,7 +290,7 @@ async def _watchdog_loop() -> None:
                         log.info("Watchdog: reconnecting stream after browser restart...")
                         await player.do_reconnect()
                     else:
-                        await _browser.navigate("http://127.0.0.1:5000/screensaver")
+                        await _browser.navigate(_SCREENSAVER_URL)
 
             elif (
                 _browser.is_running
@@ -295,7 +301,7 @@ async def _watchdog_loop() -> None:
                 log.info("Watchdog: recycling Chrome after %dh idle", CHROME_RECYCLE_HOURS)
                 if await _browser.restart():
                     player.set_browser_started_at(time.monotonic())
-                    await _browser.navigate("http://127.0.0.1:5000/screensaver")
+                    await _browser.navigate(_SCREENSAVER_URL)
 
             if _session._username and not _session.is_authenticated:
                 log.info("Watchdog: token expiring — refreshing...")
@@ -491,58 +497,6 @@ async def _fetch_other_scores() -> list[dict]:
         return _other_scores_cache
 
 
-def _get_due_up(boxscore: dict, inning_state: str) -> list[dict]:
-    team_key = "home" if inning_state == "Middle" else "away"
-    team = boxscore.get("teams", {}).get(team_key, {})
-    order = team.get("battingOrder", [])
-    players = team.get("players", {})
-    if not order:
-        return []
-
-    last_idx = 0
-    for i, pid in enumerate(order):
-        pd = players.get(f"ID{pid}", {})
-        ab = pd.get("stats", {}).get("batting", {}).get("atBats", 0)
-        bb = pd.get("stats", {}).get("batting", {}).get("baseOnBalls", 0)
-        if ab > 0 or bb > 0:
-            last_idx = i
-
-    due = []
-    for offset in range(1, 4):
-        idx = (last_idx + offset) % len(order)
-        pid = order[idx]
-        pd = players.get(f"ID{pid}", {})
-        season = pd.get("seasonStats", {}).get("batting", {})
-        due.append({
-            "name": pd.get("person", {}).get("fullName", ""),
-            "avg": season.get("avg", ".000"),
-            "hr": season.get("homeRuns", 0),
-            "rbi": season.get("rbi", 0),
-        })
-    return due
-
-
-def _get_pitcher_summary(boxscore: dict, linescore: dict, inning_state: str) -> dict | None:
-    team_key = "away" if inning_state == "Middle" else "home"
-    team = boxscore.get("teams", {}).get(team_key, {})
-    pitcher_ids = team.get("pitchers", [])
-    players = team.get("players", {})
-    if not pitcher_ids:
-        return None
-    pid = pitcher_ids[-1]
-    pd = players.get(f"ID{pid}", {})
-    stats = pd.get("stats", {}).get("pitching", {})
-    return {
-        "name": pd.get("person", {}).get("fullName", ""),
-        "pitches": stats.get("numberOfPitches", 0),
-        "strikes": stats.get("strikes", 0),
-        "ip": stats.get("inningsPitched", "0.0"),
-        "k": stats.get("strikeOuts", 0),
-        "h": stats.get("hits", 0),
-        "er": stats.get("earnedRuns", 0),
-    }
-
-
 @app.get("/api/pitches")
 async def get_pitches(game_id: str | None = None):
     global _last_batter_id
@@ -589,128 +543,49 @@ async def get_pitches(game_id: str | None = None):
         inning_str = f"{inning_half} {inning_num}" if inning_half else ""
         inning_state = linescore.get("inningState", "")
 
-        events = current.get("playEvents", [])
-        pitches = []
-        for ev in events:
-            if not ev.get("isPitch"):
-                continue
-            pd_ev = ev.get("pitchData", {})
-            coords = pd_ev.get("coordinates", {})
-            px = coords.get("pX")
-            pz = coords.get("pZ")
-            if px is None or pz is None:
-                continue
-            pitches.append({
-                "pX": px, "pZ": pz,
-                "type": ev.get("details", {}).get("type", {}).get("code", ""),
-                "description": ev.get("details", {}).get("description", ""),
-                "speed": ev.get("pitchNumber", 0),
-                "call": ev.get("details", {}).get("call", {}).get("description", ""),
-                "pitchType": ev.get("details", {}).get("type", {}).get("description", ""),
-                "speed_mph": pd_ev.get("startSpeed"),
-                "zone_top": pd_ev.get("strikeZoneTop", 3.4),
-                "zone_bot": pd_ev.get("strikeZoneBottom", 1.6),
-            })
+        pitches, zone_top, zone_bot = pitch_data.parse_pitches(current.get("playEvents", []))
 
-        zone_top = 3.4
-        zone_bot = 1.6
-        if pitches:
-            zone_top = pitches[-1].get("zone_top", 3.4)
-            zone_bot = pitches[-1].get("zone_bot", 1.6)
+        cache_key = (batter_id, pitcher_id) if batter_id and pitcher_id else None
+        has_cached = cache_key in _batter_vs_pitcher_cache if cache_key else False
+        cached_vs = _batter_vs_pitcher_cache.get(cache_key) if has_cached else None
 
-        batter_intel = None
+        batter_intel, needs_vs_fetch = pitch_data.parse_batter_intel(
+            batter_id, pitcher_id, batter_name, inning_half,
+            boxscore, _last_batter_id, cached_vs, has_cached,
+        )
         if batter_id:
-            is_new = batter_id != _last_batter_id
             _last_batter_id = batter_id
 
-            bat_team = "away" if inning_half == "Top" else "home"
-            bp = boxscore.get("teams", {}).get(bat_team, {}).get("players", {}).get(f"ID{batter_id}", {})
-            season = bp.get("seasonStats", {}).get("batting", {})
-            today = bp.get("stats", {}).get("batting", {})
+        if needs_vs_fetch and cache_key:
+            async def _fetch_vs(bid, pid, key):
+                try:
+                    vurl = (f"https://statsapi.mlb.com/api/v1/people/{bid}/stats"
+                            f"?stats=vsPlayer&opposingPlayerId={pid}&group=hitting")
+                    async with httpx.AsyncClient(timeout=6) as c:
+                        r = await c.get(vurl)
+                        if r.status_code == 200:
+                            splits = r.json().get("stats", [{}])[0].get("splits", [])
+                            if splits:
+                                s = splits[0].get("stat", {})
+                                _batter_vs_pitcher_cache[key] = {
+                                    "ab": s.get("atBats", 0), "h": s.get("hits", 0),
+                                    "hr": s.get("homeRuns", 0), "avg": s.get("avg", ".000"),
+                                }
+                            else:
+                                _batter_vs_pitcher_cache[key] = None
+                except Exception:
+                    _batter_vs_pitcher_cache[key] = None
+                if len(_batter_vs_pitcher_cache) > _BATTER_CACHE_MAX:
+                    evict = list(_batter_vs_pitcher_cache)[: _BATTER_CACHE_MAX // 2]
+                    for k in evict:
+                        _batter_vs_pitcher_cache.pop(k, None)
+            asyncio.create_task(_fetch_vs(batter_id, pitcher_id, cache_key))
 
-            vs = None
-            cache_key = (batter_id, pitcher_id) if pitcher_id else None
-            if cache_key and cache_key in _batter_vs_pitcher_cache:
-                vs = _batter_vs_pitcher_cache[cache_key]
-            elif cache_key:
-                async def _fetch_vs(bid, pid, key):
-                    try:
-                        vurl = (f"https://statsapi.mlb.com/api/v1/people/{bid}/stats"
-                                f"?stats=vsPlayer&opposingPlayerId={pid}&group=hitting")
-                        async with httpx.AsyncClient(timeout=6) as c:
-                            r = await c.get(vurl)
-                            if r.status_code == 200:
-                                splits = r.json().get("stats", [{}])[0].get("splits", [])
-                                if splits:
-                                    s = splits[0].get("stat", {})
-                                    _batter_vs_pitcher_cache[key] = {
-                                        "ab": s.get("atBats", 0), "h": s.get("hits", 0),
-                                        "hr": s.get("homeRuns", 0), "avg": s.get("avg", ".000"),
-                                    }
-                                else:
-                                    _batter_vs_pitcher_cache[key] = None
-                    except Exception:
-                        _batter_vs_pitcher_cache[key] = None
-                asyncio.create_task(_fetch_vs(batter_id, pitcher_id, cache_key))
-
-            batter_intel = {
-                "is_new": is_new,
-                "name": batter_name,
-                "season": {
-                    "avg": season.get("avg", ".000"), "obp": season.get("obp", ".000"),
-                    "slg": season.get("slg", ".000"), "hr": season.get("homeRuns", 0),
-                },
-                "today": {
-                    "ab": today.get("atBats", 0), "h": today.get("hits", 0),
-                    "hr": today.get("homeRuns", 0), "bb": today.get("baseOnBalls", 0),
-                },
-                "vs_pitcher": vs,
-            }
-
-        break_data = None
-        if inning_state in ("Middle", "End"):
-            other_scores = await _fetch_other_scores()
-            due_up = _get_due_up(boxscore, inning_state)
-            pitcher_summary = _get_pitcher_summary(boxscore, linescore, inning_state)
-            ls_teams = linescore.get("teams", {})
-            gd = data.get("gameData", {}).get("teams", {})
-            break_data = {
-                "active": True,
-                "other_scores": other_scores,
-                "due_up": due_up,
-                "pitcher": pitcher_summary,
-                "game_score": {
-                    "away": gd.get("away", {}).get("abbreviation", ""),
-                    "home": gd.get("home", {}).get("abbreviation", ""),
-                    "away_r": ls_teams.get("away", {}).get("runs", 0),
-                    "home_r": ls_teams.get("home", {}).get("runs", 0),
-                },
-                "inning": inning_str,
-            }
-
-        offense = linescore.get("offense", {})
-        runners = {
-            "first": "first" in offense,
-            "second": "second" in offense,
-            "third": "third" in offense
-        }
-
-        ls_teams = linescore.get("teams", {})
-        gd_teams = data.get("gameData", {}).get("teams", {})
-        score = {
-            "away": ls_teams.get("away", {}).get("runs", 0),
-            "home": ls_teams.get("home", {}).get("runs", 0),
-            "away_abbr": gd_teams.get("away", {}).get("abbreviation", ""),
-            "home_abbr": gd_teams.get("home", {}).get("abbreviation", ""),
-        }
-
-        innings_list = []
-        for inn in linescore.get("innings", []):
-            innings_list.append({
-                "num": inn.get("num"),
-                "away": inn.get("away", {}).get("runs"),
-                "home": inn.get("home", {}).get("runs"),
-            })
+        other_scores = await _fetch_other_scores() if inning_state in ("Middle", "End") else []
+        break_data = pitch_data.parse_break_data(
+            inning_state, boxscore, linescore, data.get("gameData", {}),
+            other_scores, inning_str,
+        )
 
         return {
             "game_id": target_id,
@@ -723,9 +598,9 @@ async def get_pitches(game_id: str | None = None):
             "outs": outs,
             "inning": inning_str,
             "inning_state": inning_state,
-            "runners": runners,
-            "score": score,
-            "linescore": innings_list,
+            "runners": pitch_data.parse_runners(linescore),
+            "score": pitch_data.parse_score(linescore, data.get("gameData", {})),
+            "linescore": pitch_data.parse_innings(linescore),
             "zone_top": zone_top,
             "zone_bot": zone_bot,
             "batter_intel": batter_intel,
@@ -1002,6 +877,10 @@ async def update_settings(body: dict):
         patch["screensaver_music_size"] = body["screensaver_music_size"] if body["screensaver_music_size"] in ("small", "medium", "large") else "medium"
     if "screensaver_schedule_scale" in body:
         patch["screensaver_schedule_scale"] = max(50, min(200, int(body["screensaver_schedule_scale"])))
+    if "favorite_teams" in body:
+        raw = body["favorite_teams"]
+        if isinstance(raw, list):
+            patch["favorite_teams"] = [str(t).upper() for t in raw if t]
 
     _settings.update(patch)
     _settings.save()
