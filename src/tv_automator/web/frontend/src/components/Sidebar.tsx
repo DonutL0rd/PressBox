@@ -15,8 +15,8 @@ const Sidebar: React.FC = React.memo(() => {
         </div>
         {!collapsed && (
           <div className="brand-text-block">
-            <span className="brand-title">PressBox</span>
-            <span className="brand-subtitle">Media Server</span>
+            <span className="brand-title">Homelab</span>
+            <span className="brand-subtitle">Dashboard</span>
           </div>
         )}
       </div>
@@ -63,12 +63,12 @@ const Sidebar: React.FC = React.memo(() => {
         {!collapsed && (
           <div className="status-indicator">
             <div className={`status-dot ${connected ? 'connected' : 'error'}`} />
-            {connected ? 'Connected' : 'Connecting…'}
+            {connected ? 'Up' : 'Down'}
           </div>
         )}
         {collapsed && (
-          <div className="status-indicator">
-            <div className={`status-dot ${connected ? 'connected' : 'error'}`} />
+          <div className="status-indicator" style={{ justifyContent: 'center', width: '100%' }}>
+            <div className={`status-dot ${connected ? 'connected' : 'error'}`} title={connected ? 'Up' : 'Down'} />
           </div>
         )}
       </div>

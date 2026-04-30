@@ -44,17 +44,26 @@ const GameListItem: React.FC<{
           <span className="gli-team">{game.home_team.abbreviation}</span>
         </div>
         <div className="gli-meta">
-          {isLive && <span className="live-pulse-dot" />}
-          <span className={`gli-status gli-status--${game.status}`}>{game.status_label}</span>
+          <span className={`status-badge ${game.status === 'live' ? 'live' : game.status === 'final' ? 'final' : 'scheduled'}`}>
+            {isLive && <span className="live-pulse-dot" style={{width: '6px', height: '6px'}} />}
+            {game.status_label}
+          </span>
           {!isLive && !hasScore && <span className="gli-time">· {game.display_time}</span>}
         </div>
       </div>
-      {hasScore && (
-        <div className="gli-score">
-          <span>{game.away_team.score ?? 0}</span>
-          <span>{game.home_team.score ?? 0}</span>
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {hasScore && (
+          <div className="gli-score">
+            <span>{game.away_team.score ?? 0}</span>
+            <span>{game.home_team.score ?? 0}</span>
+          </div>
+        )}
+        {isPlaying && (
+          <div style={{ color: 'var(--primary)', marginLeft: '4px' }}>
+            <Play size={16} fill="currentColor" />
+          </div>
+        )}
+      </div>
     </div>
   );
 });
@@ -234,8 +243,8 @@ const GameDetailPanel: React.FC<{
         </div>
 
         <div className="detail-meta">
-          <span className={`detail-status detail-status--${game.status}`}>
-            {isLive && <span className="live-pulse-dot" />}
+          <span className={`status-badge ${game.status === 'live' ? 'live' : game.status === 'final' ? 'final' : 'scheduled'}`}>
+            {isLive && <span className="live-pulse-dot" style={{width: '6px', height: '6px'}} />}
             {game.status_label}
             {isLive && stats?.info.status && ` · ${stats.info.status}`}
           </span>
