@@ -1,4 +1,4 @@
-# TV-Automator
+# PressBox
 
 Self-hosted streaming appliance for your TV. Runs in Docker on an Ubuntu server connected to a TV via HDMI. Control everything from a browser on your local network.
 
@@ -71,6 +71,7 @@ Go to `http://<server-ip>:5000/` in any browser. Click **Home** or **Away** on a
 TV-Automator authenticates with MLB.TV via Okta's resource owner password grant — the same API that official MLB apps use internally. No browser-based login, no CAPTCHAs, no fragile form-filling.
 
 On startup the system:
+
 1. POSTs your credentials to `ids.mlb.com` and receives an access token
 2. Initializes a GraphQL media session at `media-gateway.mlb.com`
 3. Tokens auto-refresh before expiry; a watchdog re-authenticates if they lapse
@@ -78,6 +79,7 @@ On startup the system:
 ### MLB Playback
 
 When you click a game:
+
 1. The backend queries the MLB media gateway for the game's HLS stream URL
 2. Chrome (running on the server's display) navigates to a local player page (`/player`)
 3. The player uses hls.js via a server-side HLS proxy (`/hls/`) to bypass CORS restrictions
@@ -154,15 +156,15 @@ A background watchdog monitors browser health every 30 seconds and restarts Chro
 
 ### Environment variables (`.env`)
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MLB_USERNAME` | Yes | MLB.TV account email |
-| `MLB_PASSWORD` | Yes | MLB.TV account password |
-| `DISPLAY` | No | X display (default: `:0`) |
-| `DATA_DIR` | No | Persistent data path (default: `/data`) |
-| `CHROME_PATH` | No | Chrome binary override |
-| `NAVIDROME_URL` | No | Navidrome server URL (e.g. `http://192.168.1.100:4533`) |
-| `NAVIDROME_USERNAME` | No | Navidrome account username |
+| Variable             | Required | Description                                             |
+| -------------------- | -------- | ------------------------------------------------------- |
+| `MLB_USERNAME`       | Yes      | MLB.TV account email                                    |
+| `MLB_PASSWORD`       | Yes      | MLB.TV account password                                 |
+| `DISPLAY`            | No       | X display (default: `:0`)                               |
+| `DATA_DIR`           | No       | Persistent data path (default: `/data`)                 |
+| `CHROME_PATH`        | No       | Chrome binary override                                  |
+| `NAVIDROME_URL`      | No       | Navidrome server URL (e.g. `http://192.168.1.100:4533`) |
+| `NAVIDROME_USERNAME` | No       | Navidrome account username                              |
 
 The Navidrome password and all other runtime settings are configured through the **Settings** view in the dashboard and saved to `config/user.yaml`.
 
@@ -171,25 +173,25 @@ The Navidrome password and all other runtime settings are configured through the
 ```yaml
 providers:
   mlb:
-    favorite_teams: ["NYY", "LAD"]   # 3-letter team codes
-    auto_start: false                 # Auto-play when favorites go live
-    default_feed: "HOME"             # Default broadcast feed (HOME or AWAY)
+    favorite_teams: ["NYY", "LAD"] # 3-letter team codes
+    auto_start: false # Auto-play when favorites go live
+    default_feed: "HOME" # Default broadcast feed (HOME or AWAY)
 
 scheduler:
-  poll_interval: 60                   # Seconds between schedule refreshes
-  pre_game_minutes: 5                 # Minutes before start to watch for auto-start
+  poll_interval: 60 # Seconds between schedule refreshes
+  pre_game_minutes: 5 # Minutes before start to watch for auto-start
 
 display:
   resolution: "1920x1080"
   fullscreen: true
 
 cec:
-  enabled: false                      # HDMI CEC — power TV on/off with playback
+  enabled: false # HDMI CEC — power TV on/off with playback
   power_off_on_stop: true
 
 screensaver:
-  schedule_scale: 100                 # Schedule section zoom (50–200%)
-  music_size: medium                  # Album art size when music plays (small/medium/large)
+  schedule_scale: 100 # Schedule section zoom (50–200%)
+  music_size: medium # Album art size when music plays (small/medium/large)
 
 data_dir: "/data"
 ```
