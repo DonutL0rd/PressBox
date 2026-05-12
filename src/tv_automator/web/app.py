@@ -675,34 +675,6 @@ async def get_game_stats(game_id: str):
     home_totals = {k: ls_teams.get("home", {}).get(k, 0) for k in ("runs", "hits", "errors", "leftOnBase")}
 
     all_plays = plays.get("allPlays", [])
-    win_prob = []
-    for p in all_plays:
-        hwp = p.get("contextMetrics", {}).get("homeWinProbability")
-        ab = p.get("about", {}).get("atBatIndex")
-        if hwp is not None and ab is not None:
-            win_prob.append({"ab": ab, "hwp": round(hwp, 1)})
-
-    hits = []
-    for p in all_plays:
-        event = p.get("result", {}).get("event", "")
-        if not event:
-            continue
-        hd = p.get("hitData", {})
-        coords = hd.get("coordinates", {})
-        cx = coords.get("coordX")
-        cy = coords.get("coordY")
-        if cx is None or cy is None:
-            continue
-        hits.append({
-            "x": cx,
-            "y": cy,
-            "event": event,
-            "batter": p.get("matchup", {}).get("batter", {}).get("fullName", ""),
-            "exitVelo": hd.get("launchSpeed"),
-            "angle": hd.get("launchAngle"),
-            "distance": hd.get("totalDistance"),
-        })
-
     scoring_indices = plays.get("scoringPlays", [])
     scoring_plays_out = []
     for idx in scoring_indices:
@@ -730,8 +702,6 @@ async def get_game_stats(game_id: str):
     return {
         "info": info,
         "linescore": {"innings": innings, "away": away_totals, "home": home_totals},
-        "win_prob": win_prob,
-        "hits": hits,
         "scoring_plays": scoring_plays_out,
         "away_pitchers": away_pitchers,
         "home_pitchers": home_pitchers,

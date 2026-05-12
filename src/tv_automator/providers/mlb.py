@@ -30,27 +30,25 @@ _STATUS_MAP: dict[str, GameStatus] = {
     "Delayed Start": GameStatus.PRE_GAME,
 }
 
+_TEAM_ABBREVS: dict[str, str] = {
+    "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
+    "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
+    "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
+    "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
+    "Colorado Rockies": "COL", "Detroit Tigers": "DET",
+    "Houston Astros": "HOU", "Kansas City Royals": "KC",
+    "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
+    "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
+    "Minnesota Twins": "MIN", "New York Mets": "NYM",
+    "New York Yankees": "NYY", "Oakland Athletics": "OAK",
+    "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT",
+    "San Diego Padres": "SD", "San Francisco Giants": "SF",
+    "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
+    "Tampa Bay Rays": "TB", "Texas Rangers": "TEX",
+    "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+}
 
-MLB_TEAMS = [
-    {"abbreviation": abbr, "name": name}
-    for name, abbr in {
-        "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL",
-        "Baltimore Orioles": "BAL", "Boston Red Sox": "BOS",
-        "Chicago Cubs": "CHC", "Chicago White Sox": "CWS",
-        "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE",
-        "Colorado Rockies": "COL", "Detroit Tigers": "DET",
-        "Houston Astros": "HOU", "Kansas City Royals": "KC",
-        "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD",
-        "Miami Marlins": "MIA", "Milwaukee Brewers": "MIL",
-        "Minnesota Twins": "MIN", "New York Mets": "NYM",
-        "New York Yankees": "NYY", "Oakland Athletics": "OAK",
-        "Philadelphia Phillies": "PHI", "Pittsburgh Pirates": "PIT",
-        "San Diego Padres": "SD", "San Francisco Giants": "SF",
-        "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL",
-        "Tampa Bay Rays": "TB", "Texas Rangers": "TEX",
-        "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
-    }.items()
-]
+MLB_TEAMS = [{"abbreviation": abbr, "name": name} for name, abbr in _TEAM_ABBREVS.items()]
 
 
 class MLBProvider(StreamingProvider):
@@ -66,7 +64,7 @@ class MLBProvider(StreamingProvider):
 
     async def get_schedule(self, date: datetime) -> list[Game]:
         date_str = date.strftime("%Y-%m-%d")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             raw_games = await loop.run_in_executor(
                 None, lambda: statsapi.schedule(date=date_str),
@@ -130,7 +128,7 @@ class MLBProvider(StreamingProvider):
         return games
 
     async def get_game_status(self, game_id: str) -> GameStatus:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             data = await loop.run_in_executor(
                 None, lambda: statsapi.schedule(game_id=int(game_id)),
@@ -143,36 +141,4 @@ class MLBProvider(StreamingProvider):
 
 
 def _team_abbrev(team_name: str) -> str:
-    abbrevs: dict[str, str] = {
-        "Arizona Diamondbacks": "ARI",
-        "Atlanta Braves": "ATL",
-        "Baltimore Orioles": "BAL",
-        "Boston Red Sox": "BOS",
-        "Chicago Cubs": "CHC",
-        "Chicago White Sox": "CWS",
-        "Cincinnati Reds": "CIN",
-        "Cleveland Guardians": "CLE",
-        "Colorado Rockies": "COL",
-        "Detroit Tigers": "DET",
-        "Houston Astros": "HOU",
-        "Kansas City Royals": "KC",
-        "Los Angeles Angels": "LAA",
-        "Los Angeles Dodgers": "LAD",
-        "Miami Marlins": "MIA",
-        "Milwaukee Brewers": "MIL",
-        "Minnesota Twins": "MIN",
-        "New York Mets": "NYM",
-        "New York Yankees": "NYY",
-        "Oakland Athletics": "OAK",
-        "Philadelphia Phillies": "PHI",
-        "Pittsburgh Pirates": "PIT",
-        "San Diego Padres": "SD",
-        "San Francisco Giants": "SF",
-        "Seattle Mariners": "SEA",
-        "St. Louis Cardinals": "STL",
-        "Tampa Bay Rays": "TB",
-        "Texas Rangers": "TEX",
-        "Toronto Blue Jays": "TOR",
-        "Washington Nationals": "WSH",
-    }
-    return abbrevs.get(team_name, team_name[:3].upper())
+    return _TEAM_ABBREVS.get(team_name, team_name[:3].upper())
