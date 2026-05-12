@@ -64,14 +64,12 @@ class BrowserController:
                 log.warning("CHROME_PATH set but not found: %s", chrome_path)
 
         try:
-            # Try launching with specified channel (e.g. "chrome")
             self._browser = await self._playwright.chromium.launch(
                 channel="chrome", **launch_kwargs,
             )
             log.info("Launched Google Chrome")
         except Exception as e:
             log.warning("Chrome launch failed, falling back to bundled Chromium: %s", e)
-            # Remove executable_path if it was set, to let Playwright find its own Chromium
             launch_kwargs.pop("executable_path", None)
             self._browser = await self._playwright.chromium.launch(**launch_kwargs)
             log.info("Launched bundled Chromium")
