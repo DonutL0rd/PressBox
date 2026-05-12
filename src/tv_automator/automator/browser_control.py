@@ -60,15 +60,10 @@ class BrowserController:
         if chrome_path:
             launch_kwargs["executable_path"] = chrome_path
 
-        try:
-            self._browser = await self._playwright.chromium.launch(
-                channel="chrome", **launch_kwargs,
-            )
-            log.info("Launched Google Chrome")
-        except Exception:
-            log.warning("Chrome not found, falling back to Chromium")
-            self._browser = await self._playwright.chromium.launch(**launch_kwargs)
-            log.info("Launched Chromium")
+        self._browser = await self._playwright.chromium.launch(
+            channel="chrome", **launch_kwargs,
+        )
+        log.info("Launched Google Chrome")
 
         # Monitor for unexpected disconnects
         self._browser.on("disconnected", lambda: log.error("Browser disconnected unexpectedly"))
