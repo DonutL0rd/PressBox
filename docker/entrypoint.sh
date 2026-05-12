@@ -13,6 +13,13 @@ if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
 fi
 
 # ── Ensure DISPLAY is set ────────────────────────────────────────
+if [ "$ENABLE_LOCAL_BROWSER" = "false" ]; then
+    echo "[*] Local browser disabled via ENABLE_LOCAL_BROWSER=false"
+    mkdir -p /data/cookies /data/config /data/logs
+    echo "[*] Starting TV-Automator on port 5000..."
+    exec python -m tv_automator.main
+fi
+
 if [ -z "$DISPLAY" ]; then
     export DISPLAY=:0
 fi
@@ -21,8 +28,8 @@ echo "[*] DISPLAY=$DISPLAY"
 # ── Find X11 auth cookie (try common locations) ──────────────────
 for xauth_candidate in \
         "$XAUTHORITY" \
-        "/run/user/1000/gdm/Xauthority" \
-        "/run/user/1000/.mutter-Xwaylandauth."* \
+        "/run/user/${HOST_UID:-1000}/gdm/Xauthority" \
+        "/run/user/${HOST_UID:-1000}/.mutter-Xwaylandauth."* \
         "$HOME/.Xauthority" \
         "/tmp/.Xauthority"; do
     [ -z "$xauth_candidate" ] && continue

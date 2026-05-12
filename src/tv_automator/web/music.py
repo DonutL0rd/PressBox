@@ -14,11 +14,13 @@ import logging
 import os
 import random
 import secrets
+import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import StreamingResponse
 
 if TYPE_CHECKING:
     from tv_automator.web.app import AppContext
@@ -29,15 +31,22 @@ log = logging.getLogger(__name__)
 
 _ctx: AppContext  # set by init()
 
+_music_state = {
+    "is_playing": False,
+    "is_paused": False,
+    "start_time": 0.0,         # monotonic time when song started/resumed
+    "position_offset": 0.0,    # accumulated time from previous play segments
+    "queue": [],
+    "index": -1,
+    "shuffle": False,
+    "repeat": "off",
+    "shuffle_order": [],
+}
+
 _mpv_proc: asyncio.subprocess.Process | None = None
 _mpv_socket = "/tmp/mpv-music.sock"
-_music_queue: list[dict] = []        # [{id, title, artist, albumId, duration}, …]
-_music_queue_index: int = -1
-_music_shuffle: bool = False
-_music_repeat: str = "off"           # off | all | one
-_music_shuffle_order: list[int] = []
 _music_watcher_task: asyncio.Task | None = None
-_music_lock: asyncio.Lock            # initialised in init()
+_music_lock: asyncio.Lock
 
 _last_music_broadcast: str = ""
 
@@ -171,18 +180,18 @@ async def _mpv_stop() -> None:
 # ── Queue helpers ─────────────────────────────────────────────────
 
 def _music_build_shuffle_order() -> None:
-    global _music_shuffle_order
-    _music_shuffle_order = list(range(len(_music_queue)))
-    random.shuffle(_music_shuffle_order)
-    if _music_queue_index in _music_shuffle_order:
-        _music_shuffle_order.remove(_music_queue_index)
-        _music_shuffle_order.insert(0, _music_queue_index)
+    _music_state["shuffle_order"] = list(range(len(_music_state["queue"])))
+    random.shuffle(_music_state["shuffle_order"])
+    if _music_state["index"] in _music_state["shuffle_order"]:
+        _music_state["shuffle_order"].remove(_music_state["index"])
+        _music_state["shuffle_order"].insert(0, _music_state["index"])
 
 
 async def _music_play_current() -> None:
-    if _music_queue_index < 0 or _music_queue_index >= len(_music_queue):
+    idx = _music_state["index"]
+    if idx < 0 or idx >= len(_music_state["queue"]):
         return
-    song = _music_queue[_music_queue_index]
+    song = _music_state["queue"][idx]
     url = _subsonic_stream_url(song["id"])
     if not url:
         return
@@ -190,81 +199,102 @@ async def _music_play_current() -> None:
 
 
 async def _music_advance(direction: int = 1) -> dict | None:
-    global _music_queue_index
-    if not _music_queue:
+    if not _music_state["queue"]:
         return None
 
-    if _music_shuffle and _music_shuffle_order:
-        cur = _music_shuffle_order.index(_music_queue_index) if _music_queue_index in _music_shuffle_order else 0
+    if _music_state["shuffle"] and _music_state["shuffle_order"]:
+        cur = _music_state["shuffle_order"].index(_music_state["index"]) if _music_state["index"] in _music_state["shuffle_order"] else 0
         nxt = cur + direction
-        if nxt < 0 or nxt >= len(_music_shuffle_order):
-            if _music_repeat == "all":
-                nxt = nxt % len(_music_shuffle_order)
+        if nxt < 0 or nxt >= len(_music_state["shuffle_order"]):
+            if _music_state["repeat"] == "all":
+                nxt = nxt % len(_music_state["shuffle_order"])
             else:
                 return None
-        _music_queue_index = _music_shuffle_order[nxt]
+        _music_state["index"] = _music_state["shuffle_order"][nxt]
     else:
-        _music_queue_index += direction
-        if _music_queue_index < 0 or _music_queue_index >= len(_music_queue):
-            if _music_repeat == "all":
-                _music_queue_index = _music_queue_index % len(_music_queue)
+        _music_state["index"] += direction
+        if _music_state["index"] < 0 or _music_state["index"] >= len(_music_state["queue"]):
+            if _music_state["repeat"] == "all":
+                _music_state["index"] = _music_state["index"] % len(_music_state["queue"])
             else:
-                _music_queue_index = max(0, min(_music_queue_index, len(_music_queue) - 1))
+                _music_state["index"] = max(0, min(_music_state["index"], len(_music_state["queue"]) - 1))
                 return None
 
-    await _music_play_current()
-    return _music_queue[_music_queue_index]
+    if _ctx.browser.is_running:
+        await _music_play_current()
+    return _music_state["queue"][_music_state["index"]]
 
 
 # ── Broadcast helpers ─────────────────────────────────────────────
 
-async def _broadcast_music_status() -> None:
+async def _broadcast_music_status(force: bool = False) -> None:
     global _last_music_broadcast
     data = await get_status()
-    key = f"{data.get('playing')}|{data.get('paused')}|{data.get('song', {}) or ''}|{int(data.get('position', 0))}"
-    if key == _last_music_broadcast:
+    song = data.get('song')
+    song_id = song.get('id', '') if song else ''
+    key = f"{data.get('playing')}|{data.get('paused')}|{song_id}|{int(data.get('position', 0))}"
+    if not force and key == _last_music_broadcast:
         return
     _last_music_broadcast = key
     await _ctx.broadcast({"type": "music", **data})
 
 
 async def _broadcast_music_queue() -> None:
-    await _ctx.broadcast({"type": "queue", "songs": _music_queue, "index": _music_queue_index})
+    await _ctx.broadcast({"type": "queue", "songs": _music_state["queue"], "index": _music_state["index"]})
 
 
-# ── End-of-track watcher ──────────────────────────────────────────
+# ── Playback watcher ──────────────────────────────────────────────
 
 async def _music_watch_playback() -> None:
-    """Watch mpv for track end and auto-advance the queue."""
+    """Watch mpv or remote kiosk for track end and auto-advance the queue."""
     _tick = 0
     while True:
         await asyncio.sleep(1)
         _tick += 1
 
-        proc_done = not _mpv_proc or _mpv_proc.returncode is not None
-        idle = False
-        if not proc_done:
-            idle = await _mpv_get_property("idle-active") or False
+        should_advance = False
+        if _ctx.browser.is_running:
+            # Local mpv logic
+            local_proc_done = not _mpv_proc or _mpv_proc.returncode is not None
+            idle = False
+            if not local_proc_done:
+                idle = await _mpv_get_property("idle-active") or False
+            if local_proc_done or idle:
+                should_advance = True
+        else:
+            # Remote kiosk logic
+            from tv_automator.web import app
+            remote_state = getattr(app, "_remote_music_state", {})
+            if remote_state:
+                pos = remote_state.get("position", 0)
+                dur = remote_state.get("duration", 0)
+                # Advance if within 3s of end (more lenient for remote network jitter)
+                if dur > 5 and pos > (dur - 3):
+                    should_advance = True
+                    app._remote_music_state = {}
 
-        if proc_done or idle:
-            if not _music_queue:
+        if not should_advance:
+            if not _music_state["is_playing"]:
                 break
-            async with _music_lock:
-                if _mpv_proc and _mpv_proc.returncode is None:
-                    still_idle = await _mpv_get_property("idle-active") or False
-                    if not still_idle:
-                        continue
-                if _music_repeat == "one":
-                    await _music_play_current()
-                    continue
-                result = await _music_advance(1)
-            if result is None:
-                break
-            await _broadcast_music_queue()
+            if _tick % 2 == 0 and _ctx.ws_clients:
+                await _broadcast_music_status()
             continue
 
-        if _tick % 2 == 0 and _ctx.ws_clients:
-            await _broadcast_music_status()
+        # Advancement logic
+        if not _music_state["queue"]:
+            break
+        async with _music_lock:
+            if _music_state["repeat"] == "one":
+                if _ctx.browser.is_running: await _music_play_current()
+                continue
+            result = await _music_advance(1)
+            if result:
+                log.info("Music: automatically advancing to next track: %s", result.get("title"))
+            else:
+                _music_state["is_playing"] = False
+                break
+        await _broadcast_music_queue()
+        await _broadcast_music_status()
 
 
 def _music_start_watcher() -> None:
@@ -278,46 +308,81 @@ def _music_start_watcher() -> None:
 
 async def stop_music_internal() -> None:
     """Stop music playback and clear the queue. Safe to call from app.py."""
-    global _music_queue_index, _music_watcher_task
+    global _music_watcher_task
+    _music_state["is_playing"] = False
     if _music_watcher_task and not _music_watcher_task.done():
         _music_watcher_task.cancel()
         _music_watcher_task = None
     async with _music_lock:
         await _mpv_stop()
-        _music_queue.clear()
-        _music_queue_index = -1
+        _music_state["queue"].clear()
+        _music_state["index"] = -1
 
 
 async def get_status() -> dict:
-    """Return current music playback state (used by WS endpoint and /api/music/status)."""
-    playing = _mpv_proc is not None and _mpv_proc.returncode is None
-    song = _music_queue[_music_queue_index] if 0 <= _music_queue_index < len(_music_queue) else None
+    """Return current music playback state (used by WS endpoint and dashboard)."""
+    local_playing = _mpv_proc is not None and _mpv_proc.returncode is None
+    idx = _music_state["index"]
+    song = _music_state["queue"][idx] if 0 <= idx < len(_music_state["queue"]) else None
+    
+    # Intention to play
+    playing = local_playing or _music_state["is_playing"]
+    
+    # Calculate position from master clock
+    position = _music_state["position_offset"]
+    if playing and not _music_state["is_paused"]:
+        position += time.monotonic() - _music_state["start_time"]
+    
+    # Cap position at song duration if known
+    duration = song.get("duration", 0) if song else 0
+    if duration > 0:
+        position = min(position, float(duration))
+
     result: dict = {
         "playing": playing,
         "song": song,
-        "queue_length": len(_music_queue),
-        "queue_index": _music_queue_index,
-        "shuffle": _music_shuffle,
-        "repeat": _music_repeat,
-        "position": 0,
-        "duration": 0,
-        "paused": False,
+        "queue_length": len(_music_state["queue"]),
+        "queue_index": _music_state["index"],
+        "shuffle": _music_state["shuffle"],
+        "repeat": _music_state["repeat"],
+        "position": round(position, 2),
+        "duration": duration,
+        "paused": _music_state["is_paused"],
     }
-    if playing:
+    
+    if local_playing:
+        # Override with local mpv data if it's actually running here
         result["position"] = await _mpv_get_property("time-pos") or 0
         result["duration"] = await _mpv_get_property("duration") or 0
         result["paused"] = await _mpv_get_property("pause") or False
         result["volume"] = await _mpv_get_property("volume") or 100
+
     return result
 
 
 def get_queue_state() -> dict:
-    return {"songs": _music_queue, "index": _music_queue_index}
+    return {"songs": _music_state["queue"], "index": _music_state["index"]}
 
 
 # ── Router ────────────────────────────────────────────────────────
 
 router = APIRouter()
+
+
+@router.get("/api/music/proxy/{song_id}")
+async def music_proxy(song_id: str):
+    """Proxy the music stream from Navidrome to avoid CORS/connectivity issues."""
+    url = _subsonic_stream_url(song_id)
+    if not url:
+        raise HTTPException(503, "Navidrome not configured")
+    
+    async def stream_generator():
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream("GET", url) as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(stream_generator(), media_type="audio/mpeg")
 
 
 @router.get("/api/music/ping")
@@ -431,10 +496,18 @@ async def music_cover(item_id: str, size: int = 300):
     )
 
 
+@router.get("/api/music/stream/{song_id}")
+async def music_stream(song_id: str):
+    """Return a direct Navidrome stream URL (authenticated)."""
+    url = _subsonic_stream_url(song_id)
+    if not url:
+        raise HTTPException(503, "Navidrome not configured")
+    return {"url": url}
+
+
 @router.post("/api/music/play")
 async def music_play(body: dict):
-    """Start playing a queue of songs on the server. Body: {songs: [...], index: 0}."""
-    global _music_queue, _music_queue_index, _music_shuffle_order
+    """Start playing a queue of songs. Body: {songs: [...], index: 0}."""
     songs = body.get("songs", [])
     index = body.get("index", 0)
     if not songs:
@@ -442,7 +515,7 @@ async def music_play(body: dict):
     async with _ctx.play_lock:
         await _ctx.stop_video_for_music()
     async with _music_lock:
-        _music_queue[:] = [
+        _music_state["queue"][:] = [
             {
                 "id": s["id"],
                 "title": s.get("title", ""),
@@ -452,83 +525,118 @@ async def music_play(body: dict):
             }
             for s in songs
         ]
-        _music_queue_index = index
-        if _music_shuffle:
+        _music_state["index"] = index
+        _music_state["is_playing"] = True
+        _music_state["is_paused"] = False
+        _music_state["start_time"] = time.monotonic()
+        _music_state["position_offset"] = 0.0
+        
+        if _music_state["shuffle"]:
             _music_build_shuffle_order()
-        await _music_play_current()
+        
+        if _ctx.browser.is_running:
+            await _music_play_current()
+            
         _music_start_watcher()
+            
     await _broadcast_music_status()
     await _broadcast_music_queue()
-    return {"playing": True, "song": _music_queue[_music_queue_index]}
+    return {"playing": True, "song": _music_state["queue"][_music_state["index"]]}
 
 
 @router.post("/api/music/command")
 async def music_command(body: dict):
     """Send a transport command. Body: {command: pause|resume|next|prev|stop|seek|…}."""
-    global _music_queue_index, _music_shuffle, _music_repeat, _music_shuffle_order
     cmd = body.get("command", "")
     result: dict = {"ok": True}
     queue_changed = False
 
     if cmd == "pause":
-        await _mpv_set_property("pause", True)
+        _music_state["is_paused"] = True
+        if _ctx.browser.is_running: await _mpv_set_property("pause", True)
+        await _ctx.broadcast({"type": "music_command", "cmd": "pause"})
     elif cmd == "resume":
-        await _mpv_set_property("pause", False)
+        _music_state["is_paused"] = False
+        if _ctx.browser.is_running: await _mpv_set_property("pause", False)
+        await _ctx.broadcast({"type": "music_command", "cmd": "play"})
     elif cmd == "toggle":
-        paused = await _mpv_get_property("pause")
-        await _mpv_set_property("pause", not paused)
-        result["paused"] = not paused
+        new_paused = not _music_state["is_paused"]
+        _music_state["is_paused"] = new_paused
+        if _ctx.browser.is_running:
+            await _mpv_set_property("pause", new_paused)
+        await _ctx.broadcast({"type": "music_command", "cmd": "pause" if new_paused else "play"})
+        result["paused"] = new_paused
     elif cmd == "next":
         async with _music_lock:
             result["song"] = await _music_advance(1)
             _music_start_watcher()
+            _music_state["is_playing"] = True
+            _music_state["is_paused"] = False
         queue_changed = True
     elif cmd == "prev":
-        pos = await _mpv_get_property("time-pos")
-        if pos and pos > 3:
-            await _mpv_command("seek", 0, "absolute")
+        if _ctx.browser.is_running:
+            pos = await _mpv_get_property("time-pos")
+            if pos and pos > 3:
+                await _mpv_command("seek", 0, "absolute")
+            else:
+                async with _music_lock:
+                    result["song"] = await _music_advance(-1)
+                    _music_start_watcher()
+                    _music_state["is_paused"] = False
+                queue_changed = True
         else:
             async with _music_lock:
                 result["song"] = await _music_advance(-1)
+                _music_state["is_playing"] = True
+                _music_state["is_paused"] = False
                 _music_start_watcher()
             queue_changed = True
     elif cmd == "stop":
+        _music_state["is_playing"] = False
+        _music_state["is_paused"] = False
         await stop_music_internal()
         queue_changed = True
     elif cmd == "seek":
         val = body.get("value", 0)
-        await _mpv_command("seek", val, "absolute")
+        from tv_automator.web import app
+        app._remote_music_state = {} # Clear stale cache
+        if _ctx.browser.is_running: await _mpv_command("seek", val, "absolute")
+        await _ctx.broadcast({"type": "music_command", "cmd": "seek", "value": val})
     elif cmd == "volume":
         val = max(0, min(100, float(body.get("value", 100))))
-        await _mpv_set_property("volume", val)
+        if _ctx.browser.is_running: await _mpv_set_property("volume", val)
+        await _ctx.broadcast({"type": "volume", "volume": val})
     elif cmd == "jump":
         idx = int(body.get("value", 0))
         async with _music_lock:
-            if 0 <= idx < len(_music_queue):
-                _music_queue_index = idx
-                await _music_play_current()
+            if 0 <= idx < len(_music_state["queue"]):
+                _music_state["index"] = idx
+                if _ctx.browser.is_running:
+                    await _music_play_current()
                 _music_start_watcher()
+                _music_state["is_playing"] = True
+                _music_state["is_paused"] = False
                 queue_changed = True
             else:
                 raise HTTPException(400, "Invalid queue index")
     elif cmd == "shuffle":
         async with _music_lock:
-            _music_shuffle = body.get("value", not _music_shuffle)
-            if _music_shuffle:
+            _music_state["shuffle"] = body.get("value", not _music_state["shuffle"])
+            if _music_state["shuffle"]:
                 _music_build_shuffle_order()
             else:
-                _music_shuffle_order.clear()
-            result["shuffle"] = _music_shuffle
+                _music_state["shuffle_order"].clear()
+            result["shuffle"] = _music_state["shuffle"]
     elif cmd == "repeat":
         async with _music_lock:
             modes = ["off", "all", "one"]
-            idx = modes.index(_music_repeat) if _music_repeat in modes else 0
-            _music_repeat = modes[(idx + 1) % 3]
-            result["repeat"] = _music_repeat
+            idx = modes.index(_music_state["repeat"]) if _music_state["repeat"] in modes else 0
+            _music_state["repeat"] = modes[(idx + 1) % 3]
+            result["repeat"] = _music_state["repeat"]
     else:
         raise HTTPException(400, f"Unknown command: {cmd}")
 
-    await _broadcast_music_status()
+    await _broadcast_music_status(force=True)
     if queue_changed:
         await _broadcast_music_queue()
     return result
@@ -614,57 +722,61 @@ async def music_get_queue():
 @router.post("/api/music/queue/append")
 async def music_queue_append(body: dict):
     """Append songs to the queue without stopping current playback."""
-    global _music_queue_index, _music_shuffle_order
     songs = body.get("songs", [])
     if not songs:
         raise HTTPException(400, "No songs provided")
     need_start = False
     async with _music_lock:
         for s in songs:
-            _music_queue.append({
+            _music_state["queue"].append({
                 "id": s["id"], "title": s.get("title", ""), "artist": s.get("artist", ""),
                 "albumId": s.get("albumId") or s.get("parent", ""), "duration": s.get("duration", 0),
             })
-        if _music_shuffle:
+        if _music_state["shuffle"]:
             _music_build_shuffle_order()
-        if _music_queue_index < 0:
+        if _music_state["index"] < 0:
             need_start = True
-            _music_queue_index = 0
+            _music_state["index"] = 0
+            _music_state["is_playing"] = True
+            _music_state["is_paused"] = False
+            _music_state["start_time"] = time.monotonic()
+            _music_state["position_offset"] = 0.0
     if need_start:
         async with _ctx.play_lock:
             await _ctx.stop_video_for_music()
         async with _music_lock:
-            await _music_play_current()
+            if _ctx.browser.is_running:
+                await _music_play_current()
             _music_start_watcher()
     await _broadcast_music_queue()
     await _broadcast_music_status()
-    return {"ok": True, "queue_length": len(_music_queue)}
+    return {"ok": True, "queue_length": len(_music_state["queue"])}
 
 
 @router.post("/api/music/queue/remove")
 async def music_queue_remove(body: dict):
     """Remove a song from the queue by index."""
-    global _music_queue_index
     idx = body.get("index")
-    if idx is None or idx < 0 or idx >= len(_music_queue):
+    if idx is None or idx < 0 or idx >= len(_music_state["queue"]):
         raise HTTPException(400, "Invalid index")
     async with _music_lock:
-        _music_queue.pop(idx)
-        if _music_shuffle:
+        _music_state["queue"].pop(idx)
+        if _music_state["shuffle"]:
             _music_build_shuffle_order()
-        if idx < _music_queue_index:
-            _music_queue_index -= 1
-        elif idx == _music_queue_index:
-            if _music_queue:
-                _music_queue_index = min(_music_queue_index, len(_music_queue) - 1)
-                await _music_play_current()
+        if idx < _music_state["index"]:
+            _music_state["index"] -= 1
+        elif idx == _music_state["index"]:
+            if _music_state["queue"]:
+                _music_state["index"] = min(_music_state["index"], len(_music_state["queue"]) - 1)
+                if _ctx.browser.is_running:
+                    await _music_play_current()
                 _music_start_watcher()
             else:
-                _music_queue_index = -1
+                _music_state["index"] = -1
                 await _mpv_stop()
     await _broadcast_music_queue()
     await _broadcast_music_status()
-    return {"ok": True, "queue_length": len(_music_queue)}
+    return {"ok": True, "queue_length": len(_music_state["queue"])}
 
 
 @router.get("/api/music/starred")

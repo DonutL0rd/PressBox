@@ -30,15 +30,15 @@ echo ""
 # We merge it into ~/.Xauthority so Docker has a stable path to mount.
 find_and_merge_xauth() {
     local uid
-    uid=$(id -u)
+    uid="${HOST_UID:-$(id -u)}"
     local run_dir="/run/user/${uid}"
 
     # 1. Wayland/Xwayland: mutter auth file (GNOME)
     local mutter_auth
-    mutter_auth=$(ls "${run_dir}"/.mutter-Xwaylandauth.* 2>/dev/null | head -1)
-    if [ -n "$mutter_auth" ] && [ -f "$mutter_auth" ]; then
-        ok "Wayland/Xwayland session detected — merging mutter auth: $mutter_auth"
-        xauth merge "$mutter_auth"
+    mutter_auth=$(sudo bash -c "ls ${run_dir}/.mutter-Xwaylandauth.* 2>/dev/null" | head -1)
+    if [ -n "$mutter_auth" ]; then
+        ok "Wayland/Xwayland session detected (UID $uid) — merging mutter auth: $mutter_auth"
+        sudo xauth -f "$mutter_auth" extract - "$DISPLAY" | xauth merge -
         echo "$HOME/.Xauthority"
         return 0
     fi

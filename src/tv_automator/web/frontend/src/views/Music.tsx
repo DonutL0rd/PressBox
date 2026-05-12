@@ -26,8 +26,15 @@ const MusicTransport: React.FC = () => {
   const [liked, setLiked] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Sync position from WS
-  useEffect(() => { if (!seeking) setPos(music.position ?? 0); }, [music.position, seeking]);
+  // Sync position from WS — with smoothing to prevent bouncing
+  useEffect(() => {
+    if (seeking) return;
+    const serverPos = music.position ?? 0;
+    // Only snap if we're off by more than 2 seconds (e.g. track change or manual seek)
+    if (Math.abs(pos - serverPos) > 2) {
+      setPos(serverPos);
+    }
+  }, [music.position, seeking]);
 
   // Local tick for smooth progress
   useEffect(() => {

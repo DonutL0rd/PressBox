@@ -38,10 +38,10 @@ _CONTENT_SEARCH_QUERY = (
 
 _PLAYBACK_SESSION_MUTATION = (
     "mutation initPlaybackSession($adCapabilities: [AdExperienceType], "
-    "$mediaId: String!, $deviceId: String!, $sessionId: String!, "
-    "$quality: PlaybackQuality) { initPlaybackSession(adCapabilities: "
+    "$mediaId: String!, $deviceId: String!, $sessionId: String!) "
+    "{ initPlaybackSession(adCapabilities: "
     "$adCapabilities, mediaId: $mediaId, deviceId: $deviceId, sessionId: "
-    "$sessionId, quality: $quality) { playbackSessionId playback { url token "
+    "$sessionId) { playbackSessionId playback { url token "
     "expiration cdn } heartbeatInfo { url interval } } }"
 )
 
@@ -158,7 +158,6 @@ class MLBSession:
                 "mediaId": media_id,
                 "deviceId": self._device_id,
                 "sessionId": self._session_id,
-                "quality": "PLACEHOLDER",
             })
             playback = result["data"]["initPlaybackSession"]
             heartbeat = playback.get("heartbeatInfo") or {}

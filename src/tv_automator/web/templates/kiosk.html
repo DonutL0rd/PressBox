@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PressBox Kiosk</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: 'Inter', sans-serif; }
+  iframe { border: none; width: 100%; height: 100%; position: absolute; top: 0; left: 0; transition: opacity 1s ease; }
+  .hidden { opacity: 0; pointer-events: none; }
+  .visible { opacity: 1; pointer-events: auto; }
+  #sleep-overlay {
+    position: fixed; inset: 0; z-index: 10000;
+    background: #000; transition: opacity 2s ease;
+    pointer-events: none; opacity: 0;
+  }
+  #sleep-overlay.sleeping { opacity: 1; pointer-events: auto; }
+  </style>
+
+</head>
+<body>
+  <div id="sleep-overlay"></div>
+  <div id="debug"
+ style="position:fixed; bottom:0; left:0; color:rgba(255,255,255,0.2); font-size:10px; z-index:9999; pointer-events:none; padding:10px;">Kiosk Ready</div>
+  <iframe id="screensaver-frame" src="/screensaver" class="visible" allow="autoplay"></iframe>
+  <iframe id="player-frame" src="about:blank" class="hidden" allow="autoplay; fullscreen"></iframe>
+
+  <script>
+    const screensaver = document.getElementById('screensaver-frame');
+    const player = document.getElementById('player-frame');
+    const sleepOverlay = document.getElementById('sleep-overlay');
+    const debug = document.getElementById('debug');
+    let currentMode = 'screensaver';
+    let currentGameId = null;
+    let wakeLock = null;
+    let settings = {};
+
+    function log(msg) {
+      console.log(msg);
+      debug.textContent = `Kiosk: ${msg}`;
+    }
+
+    // ── Wake Lock ──────────────────────────────────────────────────
+    async function requestWakeLock() {
+      if (!settings.keep_awake || !navigator.wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        log("Wake Lock active");
+        wakeLock.addEventListener('release', () => {
+          log("Wake Lock released");
+        });
+      } catch (err) {
+        log(`Wake Lock error: ${err.name}, ${err.message}`);
+      }
+    }
+
+    document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+        await requestWakeLock();
+      }
+    });
+
+    // ── Sleep Timer ────────────────────────────────────────────────
+    function checkSleep() {
+      if (!settings.sleep_start || !settings.sleep_end) {
+        sleepOverlay.classList.remove('sleeping');
+        return;
+      }
+
+      const now = new Date();
+      const currentTime = now.getHours() * 100 + now.getMinutes();
+      
+      const start = parseInt(settings.sleep_start.replace(':', ''));
+      const end = parseInt(settings.sleep_end.replace(':', ''));
+
+      let isSleepTime = false;
+      if (start < end) {
+        isSleepTime = currentTime >= start && currentTime < end;
+      } else {
+        isSleepTime = currentTime >= start || currentTime < end;
+      }
+
+      if (isSleepTime) {
+        sleepOverlay.classList.add('sleeping');
+      } else {
+        sleepOverlay.classList.remove('sleeping');
+      }
+    }
+
+    setInterval(checkSleep, 30000);
+
+    function connectWs() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'status') {
+          handleStatusUpdate(data);
+        } else if (data.type === 'settings') {
+          settings = data;
+          if (settings.keep_awake) requestWakeLock();
+          checkSleep();
+        } else if (data.type === 'youtube_command' || data.type === 'player_command' || data.type === 'volume' || data.type === 'music' || data.type === 'music_command') {
+          // Relay to both iframes
+          if (screensaver.contentWindow) screensaver.contentWindow.postMessage(data, '*');
+          if (player.contentWindow) player.contentWindow.postMessage(data, '*');
+        }
+      };
+
+      ws.onopen = () => {
+        log("Connected");
+        // Fetch initial status and settings
+        fetch('/api/status').then(r => r.json()).then(handleStatusUpdate).catch(e => log(`Status error: ${e}`));
+        fetch('/api/settings').then(r => r.json()).then(s => {
+          settings = s;
+          if (settings.keep_awake) requestWakeLock();
+          checkSleep();
+        }).catch(e => log(`Settings error: ${e}`));
+      };
+      ws.onclose = () => {
+        log("Disconnected - retrying...");
+        setTimeout(connectWs, 3000);
+      };
+    }
+
+    function handleStatusUpdate(data) {
+      const isPlaying = !!data.now_playing_game_id || !!data.youtube_mode;
+      const targetMode = isPlaying ? 'player' : 'screensaver';
+      const gameId = data.now_playing_game_id || data.youtube_video_id;
+      
+      log(`Mode: ${targetMode}, Game: ${gameId}`);
+
+      if (targetMode === 'player') {
+        const playerUrl = data.youtube_mode ? '/tv/youtube' : '/player';
+        if (data.youtube_mode && data.youtube_video_id) {
+           // Append the ID to the URL if not already there
+           const url = new URL(playerUrl, window.location.href);
+           url.searchParams.set('v', data.youtube_video_id);
+           if (currentMode !== 'player' || currentGameId !== gameId) {
+             log(`Switching to YouTube: ${gameId}`);
+             player.src = url.toString();
+             switchToPlayer();
+           }
+        } else if (data.now_playing_game_id) {
+           if (currentMode !== 'player' || currentGameId !== gameId) {
+             log(`Switching to Player: ${gameId}`);
+             player.src = '/player';
+             switchToPlayer();
+           }
+        }
+        currentGameId = gameId;
+      } else {
+        if (currentMode !== 'screensaver') {
+          log('Switching to screensaver');
+          player.classList.add('hidden');
+          player.classList.remove('visible');
+          screensaver.classList.remove('hidden');
+          screensaver.classList.add('visible');
+          player.src = 'about:blank';
+          currentMode = 'screensaver';
+          currentGameId = null;
+        }
+      }
+    }
+
+    function switchToPlayer() {
+      player.classList.remove('hidden');
+      player.classList.add('visible');
+      screensaver.classList.add('hidden');
+      screensaver.classList.remove('visible');
+      currentMode = 'player';
+    }
+
+    connectWs();
+  </script>
+</body>
+</html>

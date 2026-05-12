@@ -334,6 +334,12 @@
   <div id="clock-time">12:00 PM</div>
 </div>
 
+<audio id="music-player"></audio>
+
+<div id="unmute-overlay" onclick="handleUnmuteClick()" style="position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); cursor:pointer; opacity:0; pointer-events:none; transition:opacity 0.3s;">
+  <div style="background:#1a9a8a; color:#fff; padding:12px 24px; border-radius:50px; font-family:sans-serif; font-weight:bold; font-size:1.2rem;">Tap to Enable Music</div>
+</div>
+
 <div class="stage">
 
   <div class="audio-wrap">
@@ -361,6 +367,8 @@
   };
 
   const CYCLE_MS = 8000;
+  const musicPlayer = document.getElementById('music-player');
+  const unmuteOverlay = document.getElementById('unmute-overlay');
 
   const UI = {
     body: document.body,
@@ -396,13 +404,28 @@
     ws.onclose = () => setTimeout(connectWs, 3000);
   }
 
-  function handleMusicUpdate(data) {
-    const isPlaying = data.playing && !data.paused;
+  function handleUnmuteClick() {
+    musicPlayer.muted = false;
+    musicPlayer.play().catch(() => {});
+    unmuteOverlay.classList.remove('visible');
+  }
+
+  let isTransitioning = false;
+
+  async function handleMusicUpdate(data) {
+    const isPlaying = !!data.playing;
+    const isPaused = !!data.paused;
     const song = data.song;
 
     if (isPlaying && song) {
-      if (!state.music.song || state.music.song.id !== song.id) {
+      const isNewSong = !state.music.song || state.music.song.id !== song.id;
+      
+      if (isNewSong) {
+        log(`New song: ${song.title}`);
+        isTransitioning = true;
+        state.music.song = song;
         const artUrl = `/api/music/cover/${song.albumId || song.id}?size=600`;
+        
         UI.albumArt.style.opacity = 0;
         setTimeout(() => {
           UI.albumArt.src = artUrl;
@@ -411,13 +434,44 @@
           UI.trackArtist.textContent = song.artist;
           UI.albumArt.style.opacity = 1;
         }, 500);
+
+        try {
+          const proxyUrl = `/api/music/proxy/${song.id}`;
+          musicPlayer.src = proxyUrl;
+          musicPlayer.load();
+          
+          musicPlayer.oncanplay = () => {
+             isTransitioning = false;
+             if (state.music.playing && !isPaused) {
+                musicPlayer.play().then(() => {
+                  unmuteOverlay.classList.remove('visible');
+                }).catch(e => {
+                  log("Autoplay blocked");
+                  unmuteOverlay.classList.add('visible');
+                });
+             }
+             musicPlayer.oncanplay = null;
+          };
+        } catch(e) { console.error("Stream fetch failed", e); isTransitioning = false; }
       }
+
       state.music.playing = true;
-      state.music.song = song;
       UI.body.classList.add('has-music');
+
+      if (!isTransitioning) {
+        if (isPaused) {
+          musicPlayer.pause();
+        } else {
+          musicPlayer.play().catch(() => {});
+        }
+      }
     } else {
       state.music.playing = false;
+      state.music.song = null;
+      musicPlayer.pause();
+      musicPlayer.src = "";
       UI.body.classList.remove('has-music');
+      unmuteOverlay.classList.remove('visible');
     }
   }
 
@@ -425,6 +479,63 @@
     const scale = (data.screensaver_schedule_scale || 100) / 100;
     UI.scheduleWrap.style.transform = `scale(${scale})`;
   }
+
+  musicPlayer.addEventListener('ended', () => {
+    log("Track ended - requesting next");
+    fetch('/api/music/command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ command: 'next' })
+    }).catch(() => {});
+  });
+
+  // Report state back to server for dashboard progress
+  setInterval(() => {
+    if (state.music.playing && state.music.song && !musicPlayer.paused) {
+      fetch('/api/kiosk/state', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+          mode: 'music', 
+          state: {
+            playing: true,
+            paused: false,
+            position: musicPlayer.currentTime,
+            duration: musicPlayer.duration || 0,
+            song: state.music.song
+          }
+        })
+      }).catch(() => {});
+    }
+  }, 2000);
+
+  // Listen for messages from parent (kiosk.html)
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (data.type === 'volume') {
+      if (data.volume != null) musicPlayer.volume = data.volume / 100;
+      if (data.muted != null) {
+        musicPlayer.muted = data.muted;
+        if (!data.muted) unmuteOverlay.classList.remove('visible');
+      }
+    } else if (data.type === 'music_command') {
+      if (data.cmd === 'pause') {
+        musicPlayer.pause();
+        state.music.paused = true;
+      }
+      else if (data.cmd === 'play') {
+        isTransitioning = false; // Force-break any stuck transitions
+        state.music.paused = false;
+        musicPlayer.play().then(() => {
+          unmuteOverlay.classList.remove('visible');
+        }).catch(() => {
+          log("Manual play blocked");
+          unmuteOverlay.classList.add('visible');
+        });
+      }
+      else if (data.cmd === 'seek') musicPlayer.currentTime = data.value;
+    }
+  });
 
   async function loadSettings() {
     try {

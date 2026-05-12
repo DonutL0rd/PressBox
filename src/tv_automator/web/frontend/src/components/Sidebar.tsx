@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Tv, Video, Settings, Music, PanelLeftClose, PanelLeftOpen, Box } from 'lucide-react';
+import { Tv, Video, Settings, Music, PanelLeftClose, PanelLeftOpen, Box, Monitor } from 'lucide-react';
 import { useTvAutomator } from '../hooks/useTvAutomator';
 
 const Sidebar: React.FC = React.memo(() => {
@@ -57,6 +57,19 @@ const Sidebar: React.FC = React.memo(() => {
           <Settings className="nav-icon" size={18} />
           {!collapsed && <span>Settings</span>}
         </NavLink>
+
+        <div style={{ margin: '12px 14px', borderTop: '1px solid var(--border-subtle)' }} />
+
+        <a
+          href="/kiosk"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="nav-item"
+          title="Open Kiosk View"
+        >
+          <Monitor className="nav-icon" size={18} />
+          {!collapsed && <span>Kiosk View</span>}
+        </a>
       </nav>
 
       <div className="sidebar-footer">

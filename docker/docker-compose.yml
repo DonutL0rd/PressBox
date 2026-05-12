@@ -21,18 +21,18 @@ services:
     network_mode: host
 
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - /run/user/1000:/run/user/1000:ro   # covers gdm3 X auth + PulseAudio
       - tv-automator-data:/data
+      - ../src:/app/src
+      - ./entrypoint.sh:/entrypoint.sh
 
     env_file:
       - ../.env
 
     environment:
-      - DISPLAY=${DISPLAY:-:0}
-      - PULSE_SERVER=unix:/run/user/1000/pulse/native
       - DATA_DIR=/data
+      - HOST_UID=${HOST_UID:-1001}
       - TZ=America/Los_Angeles
+      - ENABLE_LOCAL_BROWSER=false
       # Optional overrides:
       # - RESOLUTION=1920x1080       # Chrome window size (default: 1920x1080)
       # - CHROME_PATH=/usr/bin/google-chrome  # Custom Chrome binary path
