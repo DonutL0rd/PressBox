@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tv-automator"
-version = "0.2.0"
+version = "0.5.0"
 description = "Self-hosted sports streaming appliance with web dashboard"
 requires-python = ">=3.11"
 dependencies = [

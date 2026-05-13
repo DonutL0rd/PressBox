@@ -79,6 +79,11 @@ def _data_dir() -> Path:
     return Path(os.getenv("DATA_DIR", "/data"))
 
 
+def _is_local_browser_enabled() -> bool:
+    value = os.getenv("ENABLE_LOCAL_BROWSER", "true").strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
+
+
 def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None:
@@ -215,7 +220,7 @@ async def lifespan(app: FastAPI):
     youtube.init(ctx)
     player.init(ctx)
 
-    if os.getenv("ENABLE_LOCAL_BROWSER") != "false":
+    if _is_local_browser_enabled():
         try:
             await _browser.start()
             player.set_browser_started_at(time.monotonic())
@@ -223,7 +228,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             log.warning(f"Browser failed to start: {e} — Headless mode active for remote clients.")
     else:
-        log.info("Local browser launch skipped (ENABLE_LOCAL_BROWSER=false)")
+        log.info("Local browser launch skipped (ENABLE_LOCAL_BROWSER disabled)")
 
     creds = _settings.mlb_credentials
     if creds:

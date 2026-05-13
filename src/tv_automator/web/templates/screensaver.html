@@ -364,7 +364,6 @@
 
   const CYCLE_MS = 8000;
   const musicPlayer = document.getElementById('music-player');
-  const unmuteOverlay = document.getElementById('unmute-overlay');
 
   function log(msg) {
     console.log("[Screensaver]", msg);
@@ -400,7 +399,6 @@
       if (data.volume != null) musicPlayer.volume = data.volume / 100;
       if (data.muted != null) {
         musicPlayer.muted = data.muted;
-        if (!data.muted) unmuteOverlay.classList.remove('visible');
       }
     } else if (data.type === 'music_command') {
       if (data.cmd === 'pause') {
@@ -410,11 +408,8 @@
       else if (data.cmd === 'play') {
         isTransitioning = false; // Force-break any stuck transitions
         state.music.paused = false;
-        musicPlayer.play().then(() => {
-          unmuteOverlay.classList.remove('visible');
-        }).catch(() => {
+        musicPlayer.play().catch(() => {
           log("Manual play blocked");
-          unmuteOverlay.classList.add('visible');
         });
       }
       else if (data.cmd === 'seek') musicPlayer.currentTime = data.value;
@@ -445,12 +440,6 @@
     } catch (e) {
       console.error("Initial load failed", e);
     }
-  }
-
-  function handleUnmuteClick() {
-    musicPlayer.muted = false;
-    musicPlayer.play().catch(() => {});
-    unmuteOverlay.classList.remove('visible');
   }
 
   let isTransitioning = false;
@@ -486,11 +475,8 @@
           musicPlayer.oncanplay = () => {
              isTransitioning = false;
              if (state.music.playing && !isPaused) {
-                musicPlayer.play().then(() => {
-                  unmuteOverlay.classList.remove('visible');
-                }).catch(e => {
+                musicPlayer.play().catch(e => {
                   log("Autoplay blocked");
-                  unmuteOverlay.classList.add('visible');
                 });
              }
              musicPlayer.oncanplay = null;
@@ -514,7 +500,6 @@
       musicPlayer.pause();
       musicPlayer.src = "";
       UI.body.classList.remove('has-music');
-      unmuteOverlay.classList.remove('visible');
     }
   }
 
@@ -657,7 +642,7 @@
       fetch('/api/kiosk/state', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ 
+        body: JSON.dumps({ 
           mode: 'music', 
           state: {
             playing: true,

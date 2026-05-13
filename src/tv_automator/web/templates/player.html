@@ -85,19 +85,6 @@
   }
   #break-overlay.visible { opacity: 1; pointer-events: auto; }
 
-  #unmute-overlay {
-    position: fixed; inset: 0; z-index: 100;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.5); cursor: pointer;
-    opacity: 0; pointer-events: none; transition: opacity 0.3s;
-  }
-  #unmute-overlay.visible { opacity: 1; pointer-events: auto; }
-  .unmute-btn {
-    background: #d4915c; color: #fff; padding: 12px 24px; border-radius: 50px;
-    font-family: 'Inter', sans-serif; font-weight: bold; font-size: 1.2rem;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-  }
-
   .break-inner { max-width: 1200px; width: 92%; }
   .break-header {
     text-align: center; margin-bottom: 48px;
@@ -219,7 +206,6 @@
   var video = document.getElementById('video');
   var statusEl = document.getElementById('status');
   var hls = null;
-  var ws = null;
   var retries = 0;
   var reconnecting = false;
   var MAX_RETRIES = 5;
@@ -239,12 +225,6 @@
     statusEl.style.display = '';
   }
   function hideStatus() { statusEl.style.display = 'none'; }
-
-  function handleUnmuteClick() {
-    video.muted = false;
-    video.play().catch(function(){});
-    document.getElementById('unmute-overlay').classList.remove('visible');
-  }
 
   // ── Init: check feed type and settings ─────────────
   (async function init() {
@@ -347,9 +327,6 @@
       }
       if (data.muted != null) {
         video.muted = data.muted;
-        if (!data.muted) {
-          document.getElementById('unmute-overlay').classList.remove('visible');
-        }
       }
     }
   }
@@ -399,18 +376,11 @@
          fetch('/api/volume').then(r => r.json()).then(v => {
             if (!v.muted) {
                video.muted = false;
-               // If still muted (browser block), show overlay
-               setTimeout(() => {
-                 if (video.muted) {
-                   document.getElementById('unmute-overlay').classList.add('visible');
-                 }
-               }, 500);
             }
          });
       }).catch(function() {
-        console.log("Autoplay blocked, showing overlay");
+        console.log("Autoplay blocked");
         video.muted = true;
-        document.getElementById('unmute-overlay').classList.add('visible');
       });
       retries = 0; hideStatus();
       // Disable subtitles by default
