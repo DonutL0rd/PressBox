@@ -258,9 +258,10 @@ async def do_play(game_id: str, feed: str) -> StreamInfo:
         await _ctx.cec.power_on()
         await _ctx.cec.set_active_source()
 
-    ok = await _ctx.browser.navigate(_PLAYER_URL)
-    if not ok:
-        raise HTTPException(503, "Failed to navigate browser to player")
+    if _ctx.browser.is_running:
+        ok = await _ctx.browser.navigate(_PLAYER_URL)
+        if not ok:
+            raise HTTPException(503, "Failed to navigate local browser to player")
 
     await _ctx.broadcast_status()
     return info
@@ -305,7 +306,10 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
             _stream_info = info
             start_heartbeat()
             start_expiry_timer()
-        await _ctx.browser.navigate(_PLAYER_URL)
+
+        if _ctx.browser.is_running:
+            await _ctx.browser.navigate(_PLAYER_URL)
+            
         log.info("Reconnected successfully")
         return info
     except Exception:

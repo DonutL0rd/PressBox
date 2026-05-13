@@ -58,17 +58,21 @@ class BrowserController:
 
         chrome_path = os.getenv("CHROME_PATH")
         if chrome_path:
-            launch_kwargs["executable_path"] = chrome_path
+            if os.path.exists(chrome_path):
+                launch_kwargs["executable_path"] = chrome_path
+            else:
+                log.warning("CHROME_PATH set but not found: %s", chrome_path)
 
         try:
             self._browser = await self._playwright.chromium.launch(
                 channel="chrome", **launch_kwargs,
             )
             log.info("Launched Google Chrome")
-        except Exception:
-            log.warning("Chrome not found, falling back to Chromium")
+        except Exception as e:
+            log.warning("Chrome launch failed, falling back to bundled Chromium: %s", e)
+            launch_kwargs.pop("executable_path", None)
             self._browser = await self._playwright.chromium.launch(**launch_kwargs)
-            log.info("Launched Chromium")
+            log.info("Launched bundled Chromium")
 
         # Monitor for unexpected disconnects
         self._browser.on("disconnected", lambda: log.error("Browser disconnected unexpectedly"))
@@ -93,7 +97,7 @@ class BrowserController:
 
     @property
     def is_running(self) -> bool:
-        return self._browser is not None and self._browser.is_connected()
+        return self._browser is not None and self._page is not None
 
     @property
     def is_healthy(self) -> bool:

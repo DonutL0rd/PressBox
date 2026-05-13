@@ -7,10 +7,26 @@
     html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
     #player { position: fixed; inset: 0; width: 100%; height: 100%; }
     #player iframe { width: 100%; height: 100%; border: none; }
+    #unmute-overlay {
+      position: fixed; inset: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.5); cursor: pointer;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    }
+    #unmute-overlay.visible { opacity: 1; pointer-events: auto; }
+    .unmute-btn {
+      background: #ef4444; color: #fff; padding: 12px 24px; border-radius: 50px;
+      border: none;
+      font-family: sans-serif; font-weight: bold; font-size: 1.2rem;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
 <div id="player"></div>
+<div id="unmute-overlay">
+  <button type="button" class="unmute-btn" aria-label="Enable sound" onclick="handleUnmuteClick()">Tap to Enable Sound</button>
+</div>
 <script>
   // Load YouTube IFrame API
   var tag = document.createElement('script');
@@ -19,6 +35,20 @@
 
   var player;
   var ytState = { currentTime: 0, duration: 0, state: -1, volume: 100, muted: false, playbackRate: 1, ccEnabled: false };
+  var volumeState = { volume: 100, muted: false };
+
+  // Sync initial volume
+  fetch('/api/volume').then(r => r.json()).then(v => {
+    volumeState = v;
+  }).catch(() => {});
+
+  function handleUnmuteClick() {
+    if (player) {
+      player.unMute();
+      player.playVideo();
+      document.getElementById('unmute-overlay').classList.remove('visible');
+    }
+  }
 
   function onYouTubeIframeAPIReady() {
     var params = new URLSearchParams(location.search);
@@ -32,16 +62,32 @@
       videoId: v,
       playerVars: {
         autoplay: 1,
+        mute: 1,
         controls: 1,
         rel: 0,
         modestbranding: 1,
         fs: 1,
-        iv_load_policy: 3
+        iv_load_policy: 3,
+        origin: window.location.origin
       },
       events: {
         onReady: function(e) {
+          e.target.setVolume(volumeState.volume);
           e.target.playVideo();
           if (t > 0) e.target.seekTo(t, true);
+          
+          // Try to unmute if the backend says so
+          setTimeout(() => {
+            if (!volumeState.muted) {
+              e.target.unMute();
+              // If still muted (due to autoplay block), show overlay
+              setTimeout(() => {
+                if (e.target.isMuted()) {
+                  document.getElementById('unmute-overlay').classList.add('visible');
+                }
+              }, 500);
+            }
+          }, 1000);
         },
         onStateChange: function(e) {
           ytState.state = e.data;
@@ -69,10 +115,18 @@
       ytState.volume        = player.getVolume();
       ytState.muted         = player.isMuted();
       ytState.playbackRate  = player.getPlaybackRate() || 1;
-    } catch(e) {}
-  }, 500);
 
-  // Commands callable from Playwright page.evaluate()
+      // Report state back to server for remote dashboard control
+      fetch('/api/kiosk/state', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mode: 'youtube', state: ytState })
+      }).catch(function() {});
+      
+    } catch(e) {}
+  }, 1000);
+
+  // Commands callable from Playwright page.evaluate() OR message event
   window.ytPlay      = function() { if (player) player.playVideo(); };
   window.ytPause     = function() { if (player) player.pauseVideo(); };
   window.ytSeek      = function(t) { if (player) player.seekTo(t, true); };
@@ -83,10 +137,43 @@
   window.ytSetSpeed  = function(r) { if (player) { player.setPlaybackRate(parseFloat(r)); ytState.playbackRate = parseFloat(r); } };
   window.ytSetCC     = function(on) {
     if (!player) return;
-    if (on) { player.loadModule('cc'); player.setOption('cc', 'track', {languageCode: 'en'}); }
-    else { player.unloadModule('cc'); }
+    if (on) { 
+      player.loadModule('captions'); 
+      player.setOption('captions', 'track', {languageCode: 'en'}); 
+      player.setOption('captions', 'reload', true);
+    } else { 
+      player.unloadModule('captions'); 
+    }
     ytState.ccEnabled = !!on;
   };
+
+  // Listen for commands from parent (kiosk.html)
+  window.addEventListener('message', function(event) {
+    const data = event.data;
+    if (data.type === 'youtube_command') {
+      const cmd = data.cmd;
+      if (cmd === 'play') window.ytPlay();
+      else if (cmd === 'pause') window.ytPause();
+      else if (cmd === 'mute') window.ytMute();
+      else if (cmd === 'unmute') { 
+        window.ytUnmute(); 
+        document.getElementById('unmute-overlay').classList.remove('visible');
+      }
+      else if (cmd === 'seek') window.ytSeek(data.time);
+      else if (cmd === 'volume') window.ytSetVolume(data.volume);
+      else if (cmd === 'speed') window.ytSetSpeed(data.rate);
+      else if (cmd === 'cc') window.ytSetCC(data.enabled);
+    } else if (data.type === 'volume') {
+      if (data.volume != null) window.ytSetVolume(data.volume);
+      if (data.muted != null) {
+        if (data.muted) window.ytMute();
+        else {
+          window.ytUnmute();
+          document.getElementById('unmute-overlay').classList.remove('visible');
+        }
+      }
+    }
+  });
 </script>
 </body>
 </html>

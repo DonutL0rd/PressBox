@@ -57,6 +57,13 @@ def invalidate_suggested_cache() -> None:
     _suggested_cache_time = 0
 
 
+def _get_remote_youtube_state_dict() -> dict:
+    """Return shared remote YouTube state dict from app module."""
+    # Keep this import local to avoid circular imports during module initialization.
+    from tv_automator.web.app import _remote_youtube_state
+    return _remote_youtube_state
+
+
 # ── Watch history helpers ─────────────────────────────────────────
 
 def _data_dir() -> Path:
@@ -124,12 +131,17 @@ async def save_current_progress(completed: bool = False) -> None:
     """Read position from the browser and persist it."""
     if not _youtube_video_id:
         return
-    raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
-    if not raw:
-        return
-    try:
-        state = json.loads(raw)
-    except Exception:
+    state: dict | None = None
+    if _ctx.browser.is_running:
+        raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
+        if raw:
+            try:
+                state = json.loads(raw)
+            except Exception:
+                state = None
+    if state is None:
+        state = _get_remote_youtube_state_dict()
+    if not state:
         return
     position = state.get("currentTime", 0)
     duration = state.get("duration", 0)
@@ -216,9 +228,6 @@ async def play_youtube(body: dict):
     if not video_id:
         raise HTTPException(400, "Invalid YouTube URL — paste a youtube.com or youtu.be link")
 
-    if not _ctx.browser.is_running:
-        raise HTTPException(503, "Browser not running — check DISPLAY / X11")
-
     resume_pos = body.get("resume_position", 0)
     nav_url = f"http://127.0.0.1:5000/tv/youtube?v={video_id}"
     if resume_pos and resume_pos > 5:
@@ -241,12 +250,14 @@ async def play_youtube(body: dict):
         await _music.stop_music_internal()
         _youtube_mode = True
         _youtube_video_id = video_id
-        await _ctx.browser.navigate(nav_url)
+        if _ctx.browser.is_running:
+            await _ctx.browser.navigate(nav_url)
 
     async def _record():
         info = await _fetch_video_info(video_id)
         _history_record_start(video_id, info)
         start_progress_task()
+
 
     asyncio.create_task(_record())
     await _ctx.broadcast_status()
@@ -343,10 +354,14 @@ async def youtube_state():
     """Return current YouTube player state (time, duration, paused, volume)."""
     if not _youtube_mode:
         return {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
-    raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
-    if raw:
-        return json.loads(raw)
-    return {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
+    
+    if _ctx.browser.is_running:
+        raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
+        if raw:
+            return json.loads(raw)
+    
+    from tv_automator.web.app import _remote_youtube_state
+    return _remote_youtube_state or {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
 
 
 @router.post("/api/youtube/command")
@@ -362,22 +377,32 @@ async def youtube_command(body: dict):
         "unmute": "window.ytUnmute()",
     }
     if cmd in simple:
-        await _ctx.browser.evaluate(simple[cmd])
+        if _ctx.browser.is_running:
+            await _ctx.browser.evaluate(simple[cmd])
+        await _ctx.broadcast({"type": "youtube_command", **body})
     elif cmd == "seek":
         t = float(body.get("time", 0))
-        await _ctx.browser.evaluate(f"window.ytSeek({t})")
+        if _ctx.browser.is_running:
+            await _ctx.browser.evaluate(f"window.ytSeek({t})")
+        await _ctx.broadcast({"type": "youtube_command", **body})
     elif cmd == "volume":
         v = max(0, min(100, int(body.get("volume", 50))))
-        await _ctx.browser.evaluate(f"window.ytSetVolume({v})")
+        if _ctx.browser.is_running:
+            await _ctx.browser.evaluate(f"window.ytSetVolume({v})")
+        await _ctx.broadcast({"type": "youtube_command", **body})
     elif cmd == "speed":
         allowed = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0}
         r = float(body.get("rate", 1.0))
         if r not in allowed:
             r = 1.0
-        await _ctx.browser.evaluate(f"window.ytSetSpeed({r})")
+        if _ctx.browser.is_running:
+            await _ctx.browser.evaluate(f"window.ytSetSpeed({r})")
+        await _ctx.broadcast({"type": "youtube_command", **body})
     elif cmd == "cc":
         on = bool(body.get("enabled", False))
-        await _ctx.browser.evaluate(f"window.ytSetCC({'true' if on else 'false'})")
+        if _ctx.browser.is_running:
+            await _ctx.browser.evaluate(f"window.ytSetCC({'true' if on else 'false'})")
+        await _ctx.broadcast({"type": "youtube_command", **body})
     else:
         raise HTTPException(400, f"Unknown command: {cmd}")
     return {"success": True}

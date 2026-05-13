@@ -69,6 +69,9 @@ const Settings: React.FC = () => {
   const pollInterval = settings.poll_interval || 60;
   const musicSize = settings.screensaver_music_size || 'medium';
   const scheduleScale = settings.screensaver_schedule_scale ?? 100;
+  const sleepStart = settings.sleep_start || '';
+  const sleepEnd = settings.sleep_end || '';
+  const keepAwake = settings.keep_awake !== false;
   const mlbAuthenticated = settings.mlb_authenticated ?? null;
 
   // YouTube Channels
@@ -436,6 +439,51 @@ const Settings: React.FC = () => {
               />
               <span style={{fontSize:'0.8rem', color:'var(--text-tertiary)'}}>%</span>
             </div>
+          </div>
+
+          <hr style={{borderTop: '1px solid var(--border-subtle)', margin: '8px 0'}} />
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Keep Screen Awake</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Prevent browser/monitor from sleeping</div>
+            </div>
+            <label className="switch">
+              <input type="checkbox" checked={keepAwake} onChange={e => {
+                updateSetting({ keep_awake: e.target.checked });
+              }} />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Sleep Window (Start)</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Time to dim display (HH:MM)</div>
+            </div>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="22:00"
+              value={sleepStart}
+              onChange={e => updateSetting({ sleep_start: e.target.value })}
+              style={{width: '90px', textAlign: 'center'}}
+            />
+          </div>
+
+          <div className="settings-field-row">
+            <div>
+              <div className="settings-label">Sleep Window (End)</div>
+              <div style={{fontSize:'0.75rem', color:'var(--text-tertiary)'}}>Time to wake display (HH:MM)</div>
+            </div>
+            <input
+              className="settings-input"
+              type="text"
+              placeholder="06:00"
+              value={sleepEnd}
+              onChange={e => updateSetting({ sleep_end: e.target.value })}
+              style={{width: '90px', textAlign: 'center'}}
+            />
           </div>
         </div>
 

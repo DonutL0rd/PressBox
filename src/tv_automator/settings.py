@@ -36,6 +36,9 @@ class AppSettings:
         # Screensaver
         "screensaver_music_size": "medium",
         "screensaver_schedule_scale": 100,
+        "sleep_start": "",
+        "sleep_end": "",
+        "keep_awake": True,
         # YouTube
         "suggested_channels": {
             "UCsBjURrPoezykLs9EqgamOA": "Fireship",

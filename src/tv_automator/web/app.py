@@ -38,6 +38,7 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _PLAYER_HTML = (_TEMPLATE_DIR / "player.html").read_text()
 _SCREENSAVER_HTML = (_TEMPLATE_DIR / "screensaver.html").read_text()
 _YOUTUBE_HTML = (_TEMPLATE_DIR / "youtube.html").read_text()
+_KIOSK_HTML = (_TEMPLATE_DIR / "kiosk.html").read_text()
 
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -61,6 +62,11 @@ CHROME_RECYCLE_HOURS = 8
 
 _autoplay_queue: dict | None = None
 _ws_clients: set[WebSocket] = set()
+_volume: int = 100
+_muted: bool = False
+_remote_player_state: dict = {}
+_remote_youtube_state: dict = {}
+_remote_music_state: dict = {}
 _last_games_hash: str = ""
 
 _last_batter_id: int | None = None
@@ -75,6 +81,11 @@ _http_client: httpx.AsyncClient | None = None
 
 def _data_dir() -> Path:
     return Path(os.getenv("DATA_DIR", "/data"))
+
+
+def _is_local_browser_enabled() -> bool:
+    value = os.getenv("ENABLE_LOCAL_BROWSER", "true").strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -222,12 +233,15 @@ async def lifespan(app: FastAPI):
     youtube.init(ctx)
     player.init(ctx)
 
-    try:
-        await _browser.start()
-        player.set_browser_started_at(time.monotonic())
-        log.info("Browser started")
-    except Exception:
-        log.exception("Browser failed to start — check DISPLAY / X11")
+    if _is_local_browser_enabled():
+        try:
+            await _browser.start()
+            player.set_browser_started_at(time.monotonic())
+            log.info("Browser started")
+        except Exception as e:
+            log.warning(f"Browser failed to start: {e} — Headless mode active for remote clients.")
+    else:
+        log.info("Local browser launch skipped (ENABLE_LOCAL_BROWSER disabled)")
 
     creds = _settings.mlb_credentials
     if creds:
@@ -282,7 +296,7 @@ async def _watchdog_loop() -> None:
     while True:
         await asyncio.sleep(30)
         try:
-            if not _browser.is_healthy:
+            if _browser.is_running and not _browser.is_healthy:
                 log.warning("Watchdog: browser unhealthy — restarting...")
                 if await _browser.restart():
                     player.set_browser_started_at(time.monotonic())
@@ -428,9 +442,6 @@ async def get_games(date: str | None = None):
 
 @app.post("/api/play/{game_id}")
 async def play_game(game_id: str, date: str | None = None, feed: str = "HOME"):
-    if not _browser.is_running:
-        raise HTTPException(503, "Browser not running — check DISPLAY / X11")
-
     async with _play_lock:
         await music.stop_music_internal()
         player.stop_heartbeat()
@@ -748,6 +759,7 @@ async def get_status():
         "now_playing_game_id": player.get_now_playing_game_id(),
         "now_playing_feed": player.get_now_playing_feed(),
         "youtube_mode": youtube.get_youtube_mode(),
+        "youtube_video_id": youtube.get_youtube_video_id(),
         "authenticated": _session.is_authenticated,
         "browser_running": _browser.is_running,
         "heartbeat_active": player.heartbeat_active(),
@@ -768,6 +780,7 @@ async def health_check():
 
 @app.get("/api/volume")
 async def get_volume():
+    global _volume, _muted
     try:
         proc = await asyncio.create_subprocess_exec(
             "pactl", "get-sink-volume", "@DEFAULT_SINK@",
@@ -775,43 +788,70 @@ async def get_volume():
         )
         stdout, _ = await proc.communicate()
         m = re.search(r"(\d+)%", stdout.decode())
-        volume = int(m.group(1)) if m else 0
+        if m:
+            _volume = int(m.group(1))
 
         proc2 = await asyncio.create_subprocess_exec(
             "pactl", "get-sink-mute", "@DEFAULT_SINK@",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         stdout2, _ = await proc2.communicate()
-        muted = "yes" in stdout2.decode().lower()
-
-        return {"volume": volume, "muted": muted}
+        if stdout2:
+            _muted = "yes" in stdout2.decode().lower()
     except Exception:
-        log.exception("Failed to get volume")
-        raise HTTPException(500, "Volume control unavailable")
+        pass  # Fallback to internal state if pactl fails
+
+    return {"volume": _volume, "muted": _muted}
 
 
 @app.post("/api/volume")
 async def set_volume(level: int | None = None, mute: bool | None = None):
-    try:
-        if level is not None:
-            level = max(0, min(100, level))
+    global _volume, _muted
+    if level is not None:
+        _volume = max(0, min(100, level))
+        try:
             proc = await asyncio.create_subprocess_exec(
-                "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%",
+                "pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{_volume}%",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
-        if mute is not None:
+        except Exception:
+            pass
+            
+    if mute is not None:
+        _muted = bool(mute)
+        try:
             proc = await asyncio.create_subprocess_exec(
-                "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if mute else "0",
+                "pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if _muted else "0",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
-        result = await get_volume()
-        await _broadcast_volume()
-        return result
-    except Exception:
-        log.exception("Failed to set volume")
-        raise HTTPException(500, "Volume control unavailable")
+        except Exception:
+            pass
+
+    await _broadcast_volume()
+    return {"volume": _volume, "muted": _muted}
+
+
+@app.post("/api/kiosk/state")
+async def post_kiosk_state(body: dict):
+    global _remote_player_state, _remote_youtube_state, _remote_music_state
+    mode = body.get("mode")
+    state = body.get("state", {})
+
+    if mode == "player":
+        _remote_player_state = state
+        # Optional: broadcast player status update if needed
+    elif mode == "youtube":
+        _remote_youtube_state = state
+        # Youtube module polls this state in get_status
+    elif mode == "music":
+        _remote_music_state = state
+        # Server's master clock will broadcast steady updates.
+        # We only store this for end-of-track detection.
+
+    return {"ok": True}
+
 
 
 @app.get("/api/teams")
@@ -877,6 +917,12 @@ async def update_settings(body: dict):
         patch["screensaver_music_size"] = body["screensaver_music_size"] if body["screensaver_music_size"] in ("small", "medium", "large") else "medium"
     if "screensaver_schedule_scale" in body:
         patch["screensaver_schedule_scale"] = max(50, min(200, int(body["screensaver_schedule_scale"])))
+    if "sleep_start" in body:
+        patch["sleep_start"] = str(body["sleep_start"]).strip()
+    if "sleep_end" in body:
+        patch["sleep_end"] = str(body["sleep_end"]).strip()
+    if "keep_awake" in body:
+        patch["keep_awake"] = bool(body["keep_awake"])
     if "favorite_teams" in body:
         raw = body["favorite_teams"]
         if isinstance(raw, list):
@@ -1015,6 +1061,11 @@ async def player_page():
 @app.get("/screensaver", response_class=HTMLResponse)
 async def screensaver_page():
     return _SCREENSAVER_HTML
+
+
+@app.get("/kiosk", response_class=HTMLResponse)
+async def kiosk_page():
+    return _KIOSK_HTML
 
 
 @app.get("/tv/youtube", response_class=HTMLResponse)
