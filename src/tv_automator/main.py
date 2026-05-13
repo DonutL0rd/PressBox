@@ -23,7 +23,10 @@ def setup_logging(data_dir: Path) -> None:
     )
 
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("playwright").setLevel(logging.WARNING)
+    try:
+        logging.getLogger("playwright").setLevel(logging.WARNING)
+    except Exception:
+        pass
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
@@ -37,11 +40,16 @@ def main() -> None:
 
     from tv_automator.web.app import app
 
+    debug = os.getenv("DEBUG", "false").lower() == "true"
+    if debug:
+        log.info("Debug mode enabled — uvicorn reload active")
+
     uvicorn.run(
-        app,
+        "tv_automator.web.app:app" if debug else app,
         host="0.0.0.0",
         port=5000,
         log_level="info",
+        reload=debug,
     )
 
 

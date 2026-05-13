@@ -1,0 +1,40 @@
+services:
+  tv-automator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tv-automator
+    ports:
+      - "5000:5000"
+    volumes:
+      - tv-automator-data:/data
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - TZ=America/Los_Angeles
+      - ENABLE_LOCAL_BROWSER=false
+      - DEBUG=${DEBUG:-true}
+    restart: unless-stopped
+    develop:
+      watch:
+        # 1. Sync Python & Template changes (Hot-reloads uvicorn if DEBUG=true)
+        - action: sync
+          path: ./src
+          target: /app/src
+          ignore:
+            - src/tv_automator/web/frontend/node_modules/
+            - src/tv_automator/web/frontend/dist/
+        # 2. Rebuild if dependencies change
+        - action: rebuild
+          path: ./pyproject.toml
+        # 3. Rebuild if frontend source changes (Triggers TypeScript build in Dockerfile)
+        - action: rebuild
+          path: ./src/tv_automator/web/frontend/
+          ignore:
+            - src/tv_automator/web/frontend/node_modules/
+            - src/tv_automator/web/frontend/dist/
+
+volumes:
+  tv-automator-data:
+    driver: local

@@ -16,20 +16,40 @@
     pointer-events: none; opacity: 0;
   }
   #sleep-overlay.sleeping { opacity: 1; pointer-events: auto; }
+  
+  #start-overlay {
+    position: fixed; inset: 0; z-index: 20000;
+    background: #050505;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #e8e0d4; font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: opacity 1s ease;
+  }
+  #start-overlay.hidden { opacity: 0; pointer-events: none; }
+  .start-btn {
+    background: #1a9a8a; color: #fff; padding: 16px 40px; border-radius: 50px;
+    font-weight: 700; font-size: 1.5rem; letter-spacing: 0.05em;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-bottom: 20px;
+  }
+  .start-hint { color: rgba(255,255,255,0.3); font-size: 0.9rem; }
   </style>
 
 </head>
 <body>
+  <div id="start-overlay" onclick="startKiosk()">
+    <div class="start-btn">ENTER PRESSBOX</div>
+    <div class="start-hint">Click to enable audio and remote control</div>
+  </div>
   <div id="sleep-overlay"></div>
   <div id="debug"
  style="position:fixed; bottom:0; left:0; color:rgba(255,255,255,0.2); font-size:10px; z-index:9999; pointer-events:none; padding:10px;">Kiosk Ready</div>
-  <iframe id="screensaver-frame" src="/screensaver" class="visible" allow="autoplay"></iframe>
+  <iframe id="screensaver-frame" src="/screensaver?t=1" class="visible" allow="autoplay"></iframe>
   <iframe id="player-frame" src="about:blank" class="hidden" allow="autoplay; fullscreen"></iframe>
 
   <script>
     const screensaver = document.getElementById('screensaver-frame');
     const player = document.getElementById('player-frame');
     const sleepOverlay = document.getElementById('sleep-overlay');
+    const startOverlay = document.getElementById('start-overlay');
     const debug = document.getElementById('debug');
     let currentMode = 'screensaver';
     let currentGameId = null;
@@ -39,6 +59,15 @@
     function log(msg) {
       console.log(msg);
       debug.textContent = `Kiosk: ${msg}`;
+    }
+
+    function startKiosk() {
+      startOverlay.classList.add('hidden');
+      log("Kiosk Started");
+      // Satisfy autoplay policies for the window
+      const dummyAudio = new Audio();
+      dummyAudio.play().catch(() => {});
+      requestWakeLock();
     }
 
     // ── Wake Lock ──────────────────────────────────────────────────
@@ -96,27 +125,43 @@
 
       ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
+        if (data.type !== 'music') log(`WS Message: ${data.type}`);
+        
         if (data.type === 'status') {
           handleStatusUpdate(data);
         } else if (data.type === 'settings') {
           settings = data;
           if (settings.keep_awake) requestWakeLock();
           checkSleep();
-        } else if (data.type === 'youtube_command' || data.type === 'player_command' || data.type === 'volume' || data.type === 'music' || data.type === 'music_command') {
-          // Relay to both iframes
-          if (screensaver.contentWindow) screensaver.contentWindow.postMessage(data, '*');
-          if (player.contentWindow) player.contentWindow.postMessage(data, '*');
         }
+        
+        // Relay ALL messages to both iframes
+        if (screensaver.contentWindow) {
+          if (data.type === 'music') console.log("Relaying music to screensaver", data);
+          screensaver.contentWindow.postMessage(data, '*');
+        }
+        if (player.contentWindow) player.contentWindow.postMessage(data, '*');
       };
 
       ws.onopen = () => {
         log("Connected");
         // Fetch initial status and settings
-        fetch('/api/status').then(r => r.json()).then(handleStatusUpdate).catch(e => log(`Status error: ${e}`));
+        fetch('/api/status').then(r => r.json()).then(data => {
+          handleStatusUpdate(data);
+          // Relay initial status to iframes
+          const statusMsg = { type: 'status', ...data };
+          if (screensaver.contentWindow) screensaver.contentWindow.postMessage(statusMsg, '*');
+          if (player.contentWindow) player.contentWindow.postMessage(statusMsg, '*');
+        }).catch(e => log(`Status error: ${e}`));
+        
         fetch('/api/settings').then(r => r.json()).then(s => {
           settings = s;
           if (settings.keep_awake) requestWakeLock();
           checkSleep();
+          // Relay initial settings to iframes
+          const settingsMsg = { type: 'settings', ...s };
+          if (screensaver.contentWindow) screensaver.contentWindow.postMessage(settingsMsg, '*');
+          if (player.contentWindow) player.contentWindow.postMessage(settingsMsg, '*');
         }).catch(e => log(`Settings error: ${e}`));
       };
       ws.onclose = () => {
