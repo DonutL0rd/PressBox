@@ -16,14 +16,16 @@
     #unmute-overlay.visible { opacity: 1; pointer-events: auto; }
     .unmute-btn {
       background: #ef4444; color: #fff; padding: 12px 24px; border-radius: 50px;
+      border: none;
       font-family: sans-serif; font-weight: bold; font-size: 1.2rem;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
 <div id="player"></div>
-<div id="unmute-overlay" onclick="handleUnmuteClick()">
-  <div class="unmute-btn">Tap to Enable Sound</div>
+<div id="unmute-overlay">
+  <button type="button" class="unmute-btn" aria-label="Enable sound" onclick="handleUnmuteClick()">Tap to Enable Sound</button>
 </div>
 <script>
   // Load YouTube IFrame API

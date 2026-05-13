@@ -368,18 +368,23 @@
       } catch (err) {}
     };
 
-    // Listen for messages from parent (kiosk.html)
-    window.addEventListener('message', function(event) {
-      const data = event.data;
-      if (data.type === 'player_command' || data.type === 'volume') {
-        // Construct a fake WS message object to reuse the same handler
-        ws.onmessage({ data: JSON.stringify(data) });
-      }
-    });
     ws.onclose = function() {
       setTimeout(connectWs, 3000);
     };
   }
+
+  function isWsReady(socket) {
+    return socket && socket.readyState === WebSocket.OPEN;
+  }
+
+  // Listen for messages from parent (kiosk.html)
+  window.addEventListener('message', function(event) {
+    const data = event.data;
+    if ((data.type === 'player_command' || data.type === 'volume') && isWsReady(ws)) {
+      // Construct a fake WS message object to reuse the same handler
+      ws.onmessage({ data: JSON.stringify(data) });
+    }
+  });
 
   // ── Auto-return to screensaver when VOD ends ───────
   video.addEventListener('ended', function() {

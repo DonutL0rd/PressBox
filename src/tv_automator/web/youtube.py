@@ -57,6 +57,13 @@ def invalidate_suggested_cache() -> None:
     _suggested_cache_time = 0
 
 
+def _get_remote_youtube_state_dict() -> dict:
+    """Return shared remote YouTube state dict from app module."""
+    # Keep this import local to avoid circular imports during module initialization.
+    from tv_automator.web.app import _remote_youtube_state
+    return _remote_youtube_state
+
+
 # ── Watch history helpers ─────────────────────────────────────────
 
 def _data_dir() -> Path:
@@ -124,12 +131,17 @@ async def save_current_progress(completed: bool = False) -> None:
     """Read position from the browser and persist it."""
     if not _youtube_video_id:
         return
-    raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
-    if not raw:
-        return
-    try:
-        state = json.loads(raw)
-    except Exception:
+    state: dict | None = None
+    if _ctx.browser.is_running:
+        raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
+        if raw:
+            try:
+                state = json.loads(raw)
+            except Exception:
+                state = None
+    if state is None:
+        state = _get_remote_youtube_state_dict()
+    if not state:
         return
     position = state.get("currentTime", 0)
     duration = state.get("duration", 0)
@@ -244,8 +256,7 @@ async def play_youtube(body: dict):
     async def _record():
         info = await _fetch_video_info(video_id)
         _history_record_start(video_id, info)
-        if _ctx.browser.is_running:
-            start_progress_task()
+        start_progress_task()
 
 
     asyncio.create_task(_record())

@@ -12,5 +12,5 @@ mkdir -p /data/cookies /data/config /data/logs
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
       http_proxy https_proxy all_proxy no_proxy
 
-echo "[*] PressBox on port 5000 — dashboard at http://<server-ip>:5000/"
+echo "[*] PressBox listening on container port 5000 (default host mapping: http://<server-ip>:5050/)"
 exec python -m tv_automator.main

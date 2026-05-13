@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 if TYPE_CHECKING:
     from tv_automator.web.app import AppContext
@@ -49,6 +50,8 @@ _music_watcher_task: asyncio.Task | None = None
 _music_lock: asyncio.Lock
 
 _last_music_broadcast: str = ""
+MAX_ERROR_DETAIL_BYTES = 500
+MAX_ERROR_DETAIL_CHUNKS = 16
 
 
 # ── Initialisation ───────────────────────────────────────────────
@@ -370,19 +373,61 @@ router = APIRouter()
 
 
 @router.get("/api/music/proxy/{song_id}")
-async def music_proxy(song_id: str):
+async def music_proxy(song_id: str, request: Request):
     """Proxy the music stream from Navidrome to avoid CORS/connectivity issues."""
     url = _subsonic_stream_url(song_id)
     if not url:
         raise HTTPException(503, "Navidrome not configured")
-    
-    async def stream_generator():
-        async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream("GET", url) as response:
-                async for chunk in response.aiter_bytes():
-                    yield chunk
 
-    return StreamingResponse(stream_generator(), media_type="audio/mpeg")
+    headers = {}
+    if request.headers.get("range"):
+        headers["Range"] = request.headers["range"]
+
+    client = httpx.AsyncClient(timeout=60, follow_redirects=True)
+    try:
+        req = client.build_request("GET", url, headers=headers)
+        upstream = await client.send(req, stream=True)
+    except Exception:
+        await client.aclose()
+        raise HTTPException(502, "Failed to connect to Navidrome stream server")
+    if upstream.status_code >= 400:
+        detail_chunks: list[bytes] = []
+        detail_len = 0
+        chunk_count = 0
+        async for chunk in upstream.aiter_bytes():
+            chunk_count += 1
+            if chunk_count > MAX_ERROR_DETAIL_CHUNKS:
+                break
+            if not chunk:
+                continue
+            remaining = MAX_ERROR_DETAIL_BYTES - detail_len
+            if remaining <= 0:
+                break
+            piece = chunk[:remaining]
+            detail_chunks.append(piece)
+            detail_len += len(piece)
+        detail = b"".join(detail_chunks).decode(errors="replace")
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(502, detail or f"Navidrome stream failed ({upstream.status_code})")
+
+    response_headers = {}
+    for name in ("content-type", "content-length", "accept-ranges", "content-range", "cache-control"):
+        value = upstream.headers.get(name)
+        if value:
+            response_headers[name] = value
+
+    async def _close_upstream() -> None:
+        await upstream.aclose()
+        await client.aclose()
+
+    return StreamingResponse(
+        upstream.aiter_bytes(),
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", "audio/mpeg"),
+        headers=response_headers,
+        background=BackgroundTask(_close_upstream),
+    )
 
 
 @router.get("/api/music/ping")

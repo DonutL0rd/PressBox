@@ -29,15 +29,13 @@ RUN apt-get update \
 
 COPY pyproject.toml /app/
 WORKDIR /app
-RUN pip install --upgrade pip \
-    && pip install . 2>/dev/null || true
 
 # -- Application code ---------------------------------------------------
 
 COPY src/ /app/src/
 COPY --from=frontend-builder /app/frontend/dist/ /app/src/tv_automator/web/frontend/dist/
 
-RUN pip install -e .
+RUN pip install --upgrade pip && pip install .
 
 # -- Runtime ------------------------------------------------------------
 
