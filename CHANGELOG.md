@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0] — 2026-05-12
+
+### Added
+- **Kiosk mode** — new `/kiosk` route serves a full-screen playback view that any browser on the network can open. Playback (MLB HLS, Navidrome audio, YouTube) runs client-side in that tab, so the server no longer needs a local Chrome, X server, or audio stack. The dashboard remains the control surface; the kiosk is the display.
+- **Pitch data module** — MLB pitch/batter-intel parsing extracted into a pure, side-effect-free `web/pitch_data.py` (225 lines) with full unit test coverage. `app.py` and the player now consume it via stable URL constants and a bounded batter cache.
+- **`Makefile`** — `make install` / `make test` / `make clean` for venv-based local dev without Docker.
+- **Test suite** — 9 new test modules under `tests/` covering MLB provider/session, HLS proxy, scheduler, player, settings, pitch data, and shared fixtures (~2,300 lines).
+
+### Changed
+- **Portable container** — Docker image rebuilt on `python:3.12-slim-bookworm`. Dropped Google Chrome, openbox, xvfb, xdotool, x11-utils, xdg-utils, dbus-x11, pulseaudio, alsa-utils, cec-utils, mpv, fonts-liberation, locales, and gnupg from the apt install list. Final image footprint shrinks from ~1.5 GB to ~300 MB and now builds without an apt mirror dependency surface large enough to trip transient `Unable to fetch some archives` errors.
+- **`docker-compose.yml`** — switched from `network_mode: host` (only needed for X11) to explicit `ports: 5050:5000`. Host port defaults to **5050** to dodge the macOS AirPlay Receiver, which squats on `:5000`. Dropped `/dev/dri` device mapping, `shm_size`, and `HOST_UID`. `ENABLE_LOCAL_BROWSER=false` is now the default so the kiosk-mode path is the canonical deployment.
+- **`docker/entrypoint.sh`** — collapsed from 78 lines to 14. No D-Bus, no Xvfb, no openbox, no PulseAudio bootstrap. Just makes data dirs and execs the app.
+- **OrbStack compatibility** — entrypoint now unsets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (and lowercase variants) so OrbStack's injected `NO_PROXY` with an IPv6 CIDR no longer crashes httpx during `MLBSession.__init__`.
+
+### Removed
+- `docker/openbox-config/rc.xml` — no window manager in the new model.
+- `scripts/setup-xhost.sh` and `scripts/diagnose-display.sh` — no X server access required.
+- `systemd/tv-automator-xhost.service` — no persistent xhost grant required.
+
+### New files
+- `src/tv_automator/web/templates/kiosk.html` — full-screen client-side playback surface (179 lines).
+- `src/tv_automator/web/pitch_data.py` — MLB pitch + batter intel parsing module (225 lines).
+- `Makefile` — venv-based dev workflow targets.
+- `tests/__init__.py`, `tests/conftest.py`, `tests/test_base.py`, `tests/test_hls_proxy.py`, `tests/test_mlb_provider.py`, `tests/test_mlb_session.py`, `tests/test_pitch_data.py`, `tests/test_player.py`, `tests/test_scheduler.py`, `tests/test_settings.py` — initial unit test suite.
+
 ## [0.4.2] — 2026-04-29
 
 ### Added

@@ -1,54 +1,38 @@
-# ── TV-Automator Docker Compose ──────────────────────────────────
-# Runs on an Ubuntu server with HDMI output to a monitor.
-#
-# Prerequisites:
-#   1. X11 running on the host:  xhost +local:docker
-#   2. (Optional) GPU drivers for hardware video decoding
+# ── PressBox — portable headless server ──────────────────────────
+# Runs anywhere Docker runs (laptop, NAS, VPS, cloud VM).
+# Playback happens in the client browser via /dashboard or /kiosk —
+# no host display, audio, or HDMI required.
 #
 # Usage:
 #   docker compose up -d
-#   Open http://<server-ip>:5000/ in any browser to control playback.
+#   Open http://<server-ip>:5000/ in any browser.
 # ─────────────────────────────────────────────────────────────────
 
 services:
-  tv-automator:
+  pressbox:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: tv-automator
+    container_name: pressbox
 
-    # Host network: simplest path for X11 access and nginx on port 80
-    network_mode: host
+    ports:
+      # Host 5050 → container 5000 (macOS AirPlay Receiver squats on :5000).
+      # Change the host side freely; container side must stay 5000.
+      - "5050:5000"
 
     volumes:
-      - tv-automator-data:/data
-      - ../src:/app/src
-      - ./entrypoint.sh:/entrypoint.sh
+      - pressbox-data:/data
 
     env_file:
       - ../.env
 
     environment:
       - DATA_DIR=/data
-      - HOST_UID=${HOST_UID:-1001}
       - TZ=America/Los_Angeles
       - ENABLE_LOCAL_BROWSER=false
-      # Optional overrides:
-      # - RESOLUTION=1920x1080       # Chrome window size (default: 1920x1080)
-      # - CHROME_PATH=/usr/bin/google-chrome  # Custom Chrome binary path
-      # - MLB_USERNAME=you@email.com  # MLB.TV credentials (or set in UI)
-      # - MLB_PASSWORD=yourpassword
-      # - NAVIDROME_URL=http://192.168.1.100:4533
-      # - NAVIDROME_USERNAME=admin
-      # - NAVIDROME_PASSWORD=yourpassword
-
-    devices:
-      - /dev/dri:/dev/dri
-
-    shm_size: 512mb
 
     restart: unless-stopped
 
 volumes:
-  tv-automator-data:
+  pressbox-data:
     driver: local

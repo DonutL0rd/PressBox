@@ -1,15 +1,15 @@
 # PressBox
 
-Self-hosted streaming appliance for your TV. Runs in Docker on an Ubuntu server connected to a TV via HDMI. Control everything from a browser on your local network.
+Portable self-hosted media control plane — one container, runs anywhere (laptop, NAS, VPS, cloud VM), serving MLB.TV, Navidrome, and YouTube through a unified web app. Any browser on the network opens either the **dashboard** (control surface) or the **kiosk** (full-screen playback view) — playback happens in the client browser, the server is just the brain.
 
 ## What It Does
 
-1. **Start the Docker container** on your server
-2. **Open the dashboard** at `http://<server-ip>:5000/` from any device
-3. **Watch MLB games** — live HLS streams with home/away feed selection, condensed game replays, pitch tracker, and batter intel overlays
-4. **Play music** — browse and queue from Navidrome/Subsonic; audio plays server-side via mpv + PulseAudio
-5. **Watch YouTube** — paste a URL or browse suggested channels; watch history with position resume
-6. **Everything plays on your TV** — video via Chrome + HLS, music via the server's audio output
+1. **Start the Docker container** anywhere — laptop, NAS, VPS, cloud VM, your old Mac mini
+2. **Open the dashboard** at `http://<server-ip>:5050/` from any device — phone, tablet, laptop
+3. **Open `/kiosk`** in whichever browser you want playback to happen in (a TV-connected mini PC, a Chromebook, a spare iPad)
+4. **Watch MLB games** — live HLS streams with home/away feed selection, condensed game replays, pitch tracker, and batter intel overlays
+5. **Play music** — browse and queue from Navidrome/Subsonic; audio plays in the kiosk tab
+6. **Watch YouTube** — paste a URL or browse suggested channels; watch history with position resume
 
 When idle, an ambient screensaver cycles through the day's MLB schedule with scores, innings, venue, and probable pitchers. When music is playing, the layout splits: album art and track metadata on the left, schedule carousel on the right.
 
@@ -19,9 +19,9 @@ Authentication with MLB.TV is handled entirely via API (Okta password grant) —
 
 ### Prerequisites
 
-- Ubuntu server with HDMI connected to a TV
+- A machine that runs Docker (anything — laptop, NAS, VPS, cloud VM, Raspberry Pi)
 - Docker & Docker Compose
-- A graphical session on the server (GDM, LightDM, or bare Xorg)
+- A second device with a modern browser to open `/kiosk` on (the "TV"). Same device is fine.
 - An MLB.TV subscription
 
 ### 1. Clone & configure
@@ -39,30 +39,22 @@ MLB_USERNAME=you@example.com
 MLB_PASSWORD=yourpassword
 ```
 
-### 2. Grant Docker access to the display
-
-The container needs permission to draw on the host's X display.
-
-```bash
-# One-time setup
-./scripts/setup-xhost.sh
-
-# Make it permanent (survives reboots)
-sudo cp systemd/tv-automator-xhost.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now tv-automator-xhost.service
-```
-
-### 3. Start the container
+### 2. Start the container
 
 ```bash
 cd docker
 docker compose up -d
 ```
 
-### 4. Open the dashboard
+### 3. Open the dashboard
 
-Go to `http://<server-ip>:5000/` in any browser. Click **Home** or **Away** on any live game to start streaming it on the TV.
+Go to `http://<server-ip>:5050/` in any browser. Click **Home** or **Away** on any live game.
+
+### 4. Open the kiosk on whatever you want to be "the TV"
+
+On the device you want playback to appear on, open `http://<server-ip>:5050/kiosk` and put the tab in fullscreen. Streams, music, and YouTube routed from the dashboard play here. Any number of devices can open the dashboard; pick one to be the kiosk.
+
+> **macOS note:** the default host port is **5050** because macOS AirPlay Receiver squats on `:5000`. Change the host side of `ports:` in `docker-compose.yml` if you need a different port.
 
 ## How It Works
 
@@ -106,50 +98,39 @@ A background watchdog monitors browser health every 30 seconds and restarts Chro
 ## Architecture
 
 ```
-                Browser (laptop/phone)
-                         │
-                    http://:5000
-                         │
-┌────────────────────────┼──────────────────────────────┐
-│  Docker Container      │                              │
-│                        │                              │
-│  ┌─────────────────────▼───────────────────────────┐  │
-│  │  FastAPI + uvicorn (port 5000)                  │  │
-│  │                                                 │  │
-│  │  GET  /              → React SPA (Dashboard)    │  │
-│  │  GET  /api/games     → MLB schedule             │  │
-│  │  POST /api/play      → Fetch stream → navigate  │  │
-│  │  POST /api/stop      → Stop playback            │  │
-│  │  POST /api/youtube   → Play YouTube video       │  │
-│  │  GET  /api/music/*   → Music library & control  │  │
-│  │  POST /api/music/*   → Playback + queue control │  │
-│  │  GET  /player        → HLS player + overlays    │  │
-│  │  GET  /screensaver   → Ambient schedule display │  │
-│  │  GET  /tv/youtube    → TV-side YouTube player   │  │
-│  │  GET  /hls/*         → HLS proxy (CORS bypass)  │  │
-│  │  WS   /ws            → Real-time state push     │  │
-│  └──────┬──────────┬──────────┬─────────────────────┘  │
-│         │          │          │                     │
-│  ┌──────▼───────┐  │  ┌───────▼──────────────────┐ │
-│  │ MLBSession   │  │  │ BrowserController        │ │
-│  │ (Okta auth + │  │  │ (Playwright + Chrome)    │ │
-│  │  GraphQL)    │  │  └──────────┬───────────────┘ │
-│  └──────────────┘  │             │                 │
-│                    │        X11 Socket              │
-│  ┌─────────────────▼──┐    ┌────▼───┐             │
-│  │ Navidrome Client   │    │  mpv   │             │
-│  │ (Subsonic API)     │    │ + PA   │             │
-│  └────────────────────┘    └────────┘             │
-│                                                    │
-│  ┌──────────────────┐     HDMI / Audio output      │
-│  │  CECController   ├─────────────────────────┐   │
-│  │ (TV power on/off)│                         │   │
-│  └──────────────────┘                         │   │
-└───────────────────────────────────────────────┼───┘
-                                                │
-                                           ┌────▼────┐
-                                           │   TV    │
-                                           └─────────┘
+    ┌─────────────────┐         ┌──────────────────────────┐
+    │ Dashboard tab   │         │ Kiosk tab (full-screen)  │
+    │ (phone/laptop)  │         │ HLS / audio / YouTube    │
+    └────────┬────────┘         └────────────┬─────────────┘
+             │  http://:5050                 │  WebSocket /ws
+             ▼                               ▼
+    ┌───────────────────────────────────────────────────────┐
+    │  Docker Container — runs anywhere                     │
+    │                                                       │
+    │  ┌─────────────────────────────────────────────────┐  │
+    │  │  FastAPI + uvicorn (port 5000 inside)           │  │
+    │  │                                                 │  │
+    │  │  GET  /              → React SPA (Dashboard)    │  │
+    │  │  GET  /kiosk         → Client-side playback     │  │
+    │  │  GET  /api/games     → MLB schedule             │  │
+    │  │  POST /api/play      → Resolve stream → push    │  │
+    │  │  POST /api/stop      → Stop playback            │  │
+    │  │  POST /api/youtube   → Play YouTube video       │  │
+    │  │  GET  /api/music/*   → Music library & control  │  │
+    │  │  POST /api/music/*   → Playback + queue control │  │
+    │  │  GET  /player        → HLS player + overlays    │  │
+    │  │  GET  /screensaver   → Ambient schedule display │  │
+    │  │  GET  /tv/youtube    → YouTube player page      │  │
+    │  │  GET  /hls/*         → HLS proxy (CORS bypass)  │  │
+    │  │  WS   /ws            → Real-time state push     │  │
+    │  └──────┬──────────────────┬─────────────────────────┘  │
+    │         ▼                  ▼                         │
+    │  ┌──────────────┐  ┌────────────────────┐           │
+    │  │ MLBSession   │  │ Navidrome Client   │           │
+    │  │ (Okta auth + │  │ (Subsonic API)     │           │
+    │  │  GraphQL)    │  └────────────────────┘           │
+    │  └──────────────┘                                    │
+    └───────────────────────────────────────────────────────┘
 ```
 
 ## Configuration
@@ -160,9 +141,7 @@ A background watchdog monitors browser health every 30 seconds and restarts Chro
 | -------------------- | -------- | ------------------------------------------------------- |
 | `MLB_USERNAME`       | Yes      | MLB.TV account email                                    |
 | `MLB_PASSWORD`       | Yes      | MLB.TV account password                                 |
-| `DISPLAY`            | No       | X display (default: `:0`)                               |
 | `DATA_DIR`           | No       | Persistent data path (default: `/data`)                 |
-| `CHROME_PATH`        | No       | Chrome binary override                                  |
 | `NAVIDROME_URL`      | No       | Navidrome server URL (e.g. `http://192.168.1.100:4533`) |
 | `NAVIDROME_USERNAME` | No       | Navidrome account username                              |
 
@@ -210,47 +189,56 @@ All runtime settings are available in the **Settings** view without editing file
 ## Project Structure
 
 ```
-TV-Automator/
+press_box/
+├── Makefile                              # make install / make test / make clean
 ├── docker/
-│   ├── Dockerfile
+│   ├── Dockerfile                        # python:3.12-slim base, ~300 MB image
 │   ├── docker-compose.yml
 │   └── entrypoint.sh
-├── scripts/
-│   ├── diagnose-display.sh
-│   └── setup-xhost.sh
-├── systemd/
-│   └── tv-automator-xhost.service
 ├── src/tv_automator/
-│   ├── main.py                        # Entry point (uvicorn)
-│   ├── config.py                      # Layered config (yaml + env)
+│   ├── main.py                           # Entry point (uvicorn)
+│   ├── settings.py                       # Settings store ($DATA_DIR/settings.json)
 │   ├── web/
-│   │   ├── app.py                     # FastAPI routes + WebSocket hub
+│   │   ├── app.py                        # FastAPI app wiring + WebSocket hub
+│   │   ├── player.py                     # MLB playback, HLS proxy, heartbeat
+│   │   ├── music.py                      # Subsonic/Navidrome music API + queue
+│   │   ├── youtube.py                    # YouTube playback + watch history
+│   │   ├── pitch_data.py                 # Pitch / batter-intel parsing (pure)
 │   │   ├── templates/
-│   │   │   ├── player.html            # HLS video player + pitch tracker overlay
-│   │   │   ├── screensaver.html       # Ambient schedule + music display
-│   │   │   └── youtube.html           # TV-optimized YouTube player page
-│   │   └── frontend/                  # React SPA (Vite + TypeScript)
+│   │   │   ├── kiosk.html                # Full-screen client-side playback
+│   │   │   ├── player.html               # HLS video player + pitch overlays
+│   │   │   ├── screensaver.html          # Ambient schedule + music display
+│   │   │   └── youtube.html              # YouTube player page
+│   │   └── frontend/                     # React SPA (Vite + TypeScript)
 │   │       └── src/
 │   │           ├── views/
-│   │           │   ├── Dashboard.tsx   # Game list + stream controls
-│   │           │   ├── Music.tsx       # Music library + transport bar
-│   │           │   ├── YouTube.tsx     # Video browser + watch history
-│   │           │   └── Settings.tsx    # Credentials, overlay, and display settings
+│   │           │   ├── Dashboard.tsx     # Game list + stream controls
+│   │           │   ├── Music.tsx         # Music library + transport bar
+│   │           │   ├── YouTube.tsx       # Video browser + watch history
+│   │           │   └── Settings.tsx      # Credentials + display settings
 │   │           ├── components/
-│   │           │   ├── Sidebar.tsx     # Navigation sidebar
-│   │           │   └── NowPlayingBar.tsx  # Persistent now-playing strip
+│   │           │   ├── Sidebar.tsx       # Navigation sidebar
+│   │           │   └── NowPlayingBar.tsx # Persistent now-playing strip
 │   │           └── hooks/
-│   │               └── useTvAutomator.tsx  # Global state + WebSocket
+│   │               └── useTvAutomator.tsx# Global state + WebSocket
 │   ├── providers/
-│   │   ├── base.py                    # Provider interface (Game, Team, GameStatus)
-│   │   ├── mlb.py                     # MLB schedule (Stats API)
-│   │   └── mlb_session.py             # MLB auth + streams (Okta + GraphQL)
+│   │   ├── base.py                       # Provider interface
+│   │   ├── mlb.py                        # MLB schedule (Stats API)
+│   │   └── mlb_session.py                # MLB auth + streams (Okta + GraphQL)
 │   ├── automator/
-│   │   ├── browser_control.py         # Chrome window management (Playwright)
-│   │   └── cec_control.py             # HDMI CEC — TV power on/off
+│   │   └── browser_control.py            # (legacy, gated by ENABLE_LOCAL_BROWSER)
 │   └── scheduler/
-│       └── game_scheduler.py          # Background schedule polling + auto-start
-├── config/default.yaml
+│       └── game_scheduler.py             # Schedule polling + auto-start
+├── tests/                                # Pytest suite
+│   ├── conftest.py
+│   ├── test_base.py
+│   ├── test_hls_proxy.py
+│   ├── test_mlb_provider.py
+│   ├── test_mlb_session.py
+│   ├── test_pitch_data.py
+│   ├── test_player.py
+│   ├── test_scheduler.py
+│   └── test_settings.py
 ├── .env.example
 └── pyproject.toml
 ```
@@ -267,11 +255,11 @@ TV-Automator/
 ## Development
 
 ```bash
-# Local dev (without Docker — needs Chrome installed)
-pip install -e ".[dev]"
-playwright install chromium
-cp .env.example .env  # fill in credentials
-python -m tv_automator.main
+# Local dev (without Docker)
+make install                          # builds .venv with editable install
+cp .env.example .env                  # fill in credentials
+.venv/bin/python -m tv_automator.main # serve on :5000
+make test                             # run the pytest suite
 ```
 
 ## License
