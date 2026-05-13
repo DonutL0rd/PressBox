@@ -35,10 +35,6 @@ log = logging.getLogger(__name__)
 
 # ── Templates ───────────────────────────────────────────────────
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-_PLAYER_HTML = (_TEMPLATE_DIR / "player.html").read_text()
-_SCREENSAVER_HTML = (_TEMPLATE_DIR / "screensaver.html").read_text()
-_YOUTUBE_HTML = (_TEMPLATE_DIR / "youtube.html").read_text()
-_KIOSK_HTML = (_TEMPLATE_DIR / "kiosk.html").read_text()
 
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -170,12 +166,6 @@ async def _do_stop() -> None:
     player.clear_player_state()
     youtube.clear_youtube_state()
 
-    if _browser.is_running:
-        await _browser.navigate(_SCREENSAVER_URL)
-
-    if _cec.enabled and _settings.get("cec_power_off_on_stop", True):
-        await _cec.power_off()
-
     await _broadcast_status()
 
 
@@ -192,9 +182,6 @@ async def _stop_video_for_music() -> None:
 
     player.clear_player_state()
     youtube.clear_youtube_state()
-
-    if was_playing and _browser.is_running:
-        await _browser.navigate(_SCREENSAVER_URL)
 
     if was_playing:
         await _broadcast_status()
@@ -284,14 +271,6 @@ app.include_router(youtube.router)
 app.include_router(player.router)
 
 
-async def _initial_navigate() -> None:
-    for _ in range(20):
-        await asyncio.sleep(0.5)
-        if await _browser.navigate(_SCREENSAVER_URL):
-            return
-    log.warning("Initial screensaver navigation failed after retries")
-
-
 async def _watchdog_loop() -> None:
     while True:
         await asyncio.sleep(30)
@@ -325,6 +304,15 @@ async def _watchdog_loop() -> None:
             return
         except Exception:
             log.exception("Watchdog error")
+
+
+async def _initial_navigate() -> None:
+    for _ in range(20):
+        await asyncio.sleep(0.5)
+        if await _browser.navigate(_SCREENSAVER_URL):
+            return
+    log.warning("Initial screensaver navigation failed after retries")
+
 
 
 # ── Scheduler callbacks ───────────────────────────────────────────
@@ -1055,22 +1043,22 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/player", response_class=HTMLResponse)
 async def player_page():
-    return _PLAYER_HTML
+    return (_TEMPLATE_DIR / "player.html").read_text()
 
 
 @app.get("/screensaver", response_class=HTMLResponse)
 async def screensaver_page():
-    return _SCREENSAVER_HTML
+    return (_TEMPLATE_DIR / "screensaver.html").read_text()
 
 
 @app.get("/kiosk", response_class=HTMLResponse)
 async def kiosk_page():
-    return _KIOSK_HTML
+    return (_TEMPLATE_DIR / "kiosk.html").read_text()
 
 
 @app.get("/tv/youtube", response_class=HTMLResponse)
 async def youtube_page():
-    return _YOUTUBE_HTML
+    return (_TEMPLATE_DIR / "youtube.html").read_text()
 
 
 _STATIC_DIR = Path(__file__).parent / "static"

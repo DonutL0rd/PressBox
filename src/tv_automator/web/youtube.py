@@ -131,6 +131,7 @@ async def save_current_progress(completed: bool = False) -> None:
     """Read position from the browser and persist it."""
     if not _youtube_video_id:
         return
+
     state: dict | None = None
     if _ctx.browser.is_running:
         raw = await _ctx.browser.evaluate("window.ytGetState ? window.ytGetState() : null")
@@ -139,10 +140,13 @@ async def save_current_progress(completed: bool = False) -> None:
                 state = json.loads(raw)
             except Exception:
                 state = None
+    
     if state is None:
         state = _get_remote_youtube_state_dict()
+    
     if not state:
         return
+
     position = state.get("currentTime", 0)
     duration = state.get("duration", 0)
     if _youtube_video_id not in _watch_history:
@@ -360,13 +364,13 @@ async def youtube_state():
         if raw:
             return json.loads(raw)
     
-    from tv_automator.web.app import _remote_youtube_state
-    return _remote_youtube_state or {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
+    state = _get_remote_youtube_state_dict()
+    return state or {"state": -1, "currentTime": 0, "duration": 0, "volume": 100, "muted": False}
 
 
 @router.post("/api/youtube/command")
 async def youtube_command(body: dict):
-    """Send a playback command to the YouTube player running in Chrome."""
+    """Send a playback command to the YouTube player."""
     if not _youtube_mode:
         raise HTTPException(400, "YouTube mode not active")
     cmd = body.get("cmd")

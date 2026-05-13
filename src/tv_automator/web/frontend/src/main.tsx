@@ -5,6 +5,8 @@ import App from './App'
 import './index.css'
 import { TvAutomatorProvider } from './hooks/useTvAutomator'
 
+console.log("[PressBox] Frontend Build: " + new Date().toISOString());
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <TvAutomatorProvider>
