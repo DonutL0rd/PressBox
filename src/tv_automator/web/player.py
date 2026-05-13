@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_SCREENSAVER_URL = "http://127.0.0.1:5000/screensaver"
 _PLAYER_URL = "http://127.0.0.1:5000/player"
 
 # ── Module state ─────────────────────────────────────────────────
@@ -81,7 +80,7 @@ def set_browser_started_at(t: float) -> None:
 
 
 def clear_player_state() -> None:
-    """Reset stream/player state without navigation or CEC — used by stop helpers."""
+    """Reset stream/player state — used by stop helpers."""
     global _now_playing_game_id, _now_playing_feed, _stream_info, _player_levels, _player_command
     _now_playing_game_id = None
     _now_playing_feed = "HOME"
@@ -225,13 +224,15 @@ async def do_play_condensed(game_id: str) -> StreamInfo:
         await _ctx.cec.power_on()
         await _ctx.cec.set_active_source()
 
-    if not _ctx.browser.is_running:
-        await _ctx.browser.start()
-        set_browser_started_at(time.monotonic())
+    if not _ctx.browser.is_running and os.getenv("ENABLE_LOCAL_BROWSER") != "false":
+        try:
+            await _ctx.browser.start()
+            set_browser_started_at(time.monotonic())
+        except Exception:
+            pass
 
-    ok = await _ctx.browser.navigate(_PLAYER_URL)
-    if not ok:
-        raise HTTPException(503, "Failed to navigate browser to player")
+    if _ctx.browser.is_running:
+        await _ctx.browser.navigate(_PLAYER_URL)
 
     await _ctx.broadcast_status()
     return info
@@ -309,7 +310,7 @@ async def do_reconnect(schedule_retry: bool = True) -> StreamInfo | None:
 
         if _ctx.browser.is_running:
             await _ctx.browser.navigate(_PLAYER_URL)
-            
+
         log.info("Reconnected successfully")
         return info
     except Exception:

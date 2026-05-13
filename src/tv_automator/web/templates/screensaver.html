@@ -336,10 +336,6 @@
 
 <audio id="music-player"></audio>
 
-<div id="unmute-overlay" onclick="handleUnmuteClick()" style="position:fixed; inset:0; z-index:200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); cursor:pointer; opacity:0; pointer-events:none; transition:opacity 0.3s;">
-  <div style="background:#1a9a8a; color:#fff; padding:12px 24px; border-radius:50px; font-family:sans-serif; font-weight:bold; font-size:1.2rem;">Tap to Enable Music</div>
-</div>
-
 <div class="stage">
 
   <div class="audio-wrap">
@@ -370,6 +366,10 @@
   const musicPlayer = document.getElementById('music-player');
   const unmuteOverlay = document.getElementById('unmute-overlay');
 
+  function log(msg) {
+    console.log("[Screensaver]", msg);
+  }
+
   const UI = {
     body: document.body,
     clock: document.getElementById('clock-time'),
@@ -388,20 +388,63 @@
     UI.clock.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
 
-  function connectWs() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-    ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === 'music') {
-        handleMusicUpdate(data);
-      } else if (data.type === 'settings') {
-        applySettings(data);
+  function handleMessage(data) {
+    if (!data) return;
+    if (data.type === 'music') {
+      handleMusicUpdate(data);
+    } else if (data.type === 'settings') {
+      applySettings(data);
+    } else if (data.type === 'games') {
+      renderSchedule(data.games || []);
+    } else if (data.type === 'volume') {
+      if (data.volume != null) musicPlayer.volume = data.volume / 100;
+      if (data.muted != null) {
+        musicPlayer.muted = data.muted;
+        if (!data.muted) unmuteOverlay.classList.remove('visible');
       }
-    };
+    } else if (data.type === 'music_command') {
+      if (data.cmd === 'pause') {
+        musicPlayer.pause();
+        state.music.paused = true;
+      }
+      else if (data.cmd === 'play') {
+        isTransitioning = false; // Force-break any stuck transitions
+        state.music.paused = false;
+        musicPlayer.play().then(() => {
+          unmuteOverlay.classList.remove('visible');
+        }).catch(() => {
+          log("Manual play blocked");
+          unmuteOverlay.classList.add('visible');
+        });
+      }
+      else if (data.cmd === 'seek') musicPlayer.currentTime = data.value;
+    }
+  }
 
-    ws.onclose = () => setTimeout(connectWs, 3000);
+  // Listen for messages from parent (kiosk.html)
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'music') {
+      log(`Received music message: playing=${event.data.playing}`);
+    }
+    handleMessage(event.data);
+  });
+
+  async function loadInitialData() {
+    try {
+      const settingsResp = await fetch('/api/settings');
+      const settingsData = await settingsResp.json();
+      applySettings(settingsData);
+
+      const gamesResp = await fetch('/api/games');
+      const gamesData = await gamesResp.json();
+      renderSchedule(gamesData || []);
+
+      const musicResp = await fetch('/api/music/status');
+      const musicData = await musicResp.json();
+      handleMusicUpdate(musicData);
+    } catch (e) {
+      console.error("Initial load failed", e);
+    }
   }
 
   function handleUnmuteClick() {
@@ -488,62 +531,6 @@
       body: JSON.stringify({ command: 'next' })
     }).catch(() => {});
   });
-
-  // Report state back to server for dashboard progress
-  setInterval(() => {
-    if (state.music.playing && state.music.song && !musicPlayer.paused) {
-      fetch('/api/kiosk/state', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ 
-          mode: 'music', 
-          state: {
-            playing: true,
-            paused: false,
-            position: musicPlayer.currentTime,
-            duration: musicPlayer.duration || 0,
-            song: state.music.song
-          }
-        })
-      }).catch(() => {});
-    }
-  }, 2000);
-
-  // Listen for messages from parent (kiosk.html)
-  window.addEventListener('message', (event) => {
-    const data = event.data;
-    if (data.type === 'volume') {
-      if (data.volume != null) musicPlayer.volume = data.volume / 100;
-      if (data.muted != null) {
-        musicPlayer.muted = data.muted;
-        if (!data.muted) unmuteOverlay.classList.remove('visible');
-      }
-    } else if (data.type === 'music_command') {
-      if (data.cmd === 'pause') {
-        musicPlayer.pause();
-        state.music.paused = true;
-      }
-      else if (data.cmd === 'play') {
-        isTransitioning = false; // Force-break any stuck transitions
-        state.music.paused = false;
-        musicPlayer.play().then(() => {
-          unmuteOverlay.classList.remove('visible');
-        }).catch(() => {
-          log("Manual play blocked");
-          unmuteOverlay.classList.add('visible');
-        });
-      }
-      else if (data.cmd === 'seek') musicPlayer.currentTime = data.value;
-    }
-  });
-
-  async function loadSettings() {
-    try {
-      const resp = await fetch('/api/settings');
-      const data = await resp.json();
-      applySettings(data);
-    } catch (e) {}
-  }
 
   function formatGameTime(isoString) {
     const d = new Date(isoString);
@@ -664,27 +651,30 @@
     }, CYCLE_MS);
   }
 
-  async function pollGames() {
-    try {
-      const resp = await fetch('/api/games');
-      const games = await resp.json();
-      if (Array.isArray(games)) {
-        // Clamp index if game list shrunk
-        if (state.currentIndex >= games.length) state.currentIndex = 0;
-        renderSchedule(games);
-      }
-    } catch (e) {
-      console.error("Schedule poll failed", e);
+  // Report state back to server for dashboard progress
+  setInterval(() => {
+    if (state.music.playing && state.music.song && !musicPlayer.paused) {
+      fetch('/api/kiosk/state', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+          mode: 'music', 
+          state: {
+            playing: true,
+            paused: false,
+            position: musicPlayer.currentTime,
+            duration: musicPlayer.duration || 0,
+            song: state.music.song
+          }
+        })
+      }).catch(() => {});
     }
-    setTimeout(pollGames, 60000);
-  }
+  }, 2000);
 
   // Init
   setInterval(updateClock, 1000);
   updateClock();
-  loadSettings();
-  connectWs();
-  pollGames();
+  loadInitialData();
 
 </script>
 </body>

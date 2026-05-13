@@ -5,8 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import Any
 
-from playwright.async_api import async_playwright, Playwright, Browser, Page
+try:
+    from playwright.async_api import async_playwright, Playwright, Browser, Page
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    HAS_PLAYWRIGHT = False
+    # Type aliases for when playwright is missing
+    Playwright = Any
+    Browser = Any
+    Page = Any
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +39,10 @@ class BrowserController:
         self._fullscreened: bool = False
 
     async def start(self) -> None:
+        if not HAS_PLAYWRIGHT:
+            log.warning("Playwright not installed — local browser controller disabled")
+            return
+
         log.info("Starting browser controller...")
         self._playwright = await async_playwright().start()
 

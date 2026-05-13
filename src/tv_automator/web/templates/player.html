@@ -152,9 +152,6 @@
 </head>
 <body>
 <video id="video" autoplay muted playsinline></video>
-<div id="unmute-overlay" onclick="handleUnmuteClick()">
-  <div class="unmute-btn">Tap to Enable Sound</div>
-</div>
 <div id="status"></div>
 
 <!-- Strike zone / batter intel overlay (same position, toggle between them) -->
@@ -287,8 +284,6 @@
       szPollTimer = setInterval(pollPitches, 6000);
       setTimeout(pollPitches, 500);
     }
-    
-    connectWs();
   })();
 
   function handleSettings(data) {
@@ -314,72 +309,55 @@
       }
   }
 
-  function connectWs() {
-    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
-    
-    ws.onmessage = function(e) {
-      try {
-        var data = JSON.parse(e.data);
-        if (data.type === 'settings' && !isCondensed) {
-          handleSettings(data);
-        } else if (data.type === 'player_command') {
-          var cmd = data.command || data.action;
-          if (cmd === 'quality' && hls) {
-            var lvl = parseInt(data.level);
-            hls.currentLevel = isNaN(lvl) ? -1 : lvl;
-          } else if (cmd === 'captions') {
-            const enabled = !!data.enabled;
-            if (hls) {
-              if (enabled) {
-                // Find English track or use first one
-                let trackIdx = -1;
-                if (hls.subtitleTracks && hls.subtitleTracks.length > 0) {
-                  trackIdx = hls.subtitleTracks.findIndex(t => (t.name || t.lang || '').toLowerCase().includes('en'));
-                  if (trackIdx < 0) trackIdx = 0;
-                }
-                hls.subtitleTrack = trackIdx;
-              } else {
-                hls.subtitleTrack = -1;
-              }
+  function handleMessage(data) {
+    if (!data) return;
+    if (data.type === 'settings' && !isCondensed) {
+      handleSettings(data);
+    } else if (data.type === 'player_command') {
+      var cmd = data.command || data.action;
+      if (cmd === 'quality' && hls) {
+        var lvl = parseInt(data.level);
+        hls.currentLevel = isNaN(lvl) ? -1 : lvl;
+      } else if (cmd === 'captions') {
+        const enabled = !!data.enabled;
+        if (hls) {
+          if (enabled) {
+            let trackIdx = -1;
+            if (hls.subtitleTracks && hls.subtitleTracks.length > 0) {
+              trackIdx = hls.subtitleTracks.findIndex(t => (t.name || t.lang || '').toLowerCase().includes('en'));
+              if (trackIdx < 0) trackIdx = 0;
             }
-            // Also toggle native text tracks for non-HLS
-            var tracks = video.textTracks;
-            for (var ti = 0; ti < tracks.length; ti++) {
-              tracks[ti].mode = enabled ? 'showing' : 'hidden';
-            }
-          }
- else if (cmd === 'play') {
-            video.play().catch(function(){});
-          } else if (cmd === 'pause') {
-            video.pause();
-          }
-        } else if (data.type === 'volume') {
-          if (data.volume != null) {
-            video.volume = data.volume / 100;
-          }
-          if (data.muted != null) {
-            video.muted = data.muted;
-            if (!data.muted) {
-              document.getElementById('unmute-overlay').classList.remove('visible');
-            }
+            hls.subtitleTrack = trackIdx;
+          } else {
+            hls.subtitleTrack = -1;
           }
         }
-      } catch (err) {}
-    };
-
-    // Listen for messages from parent (kiosk.html)
-    window.addEventListener('message', function(event) {
-      const data = event.data;
-      if (data.type === 'player_command' || data.type === 'volume') {
-        // Construct a fake WS message object to reuse the same handler
-        ws.onmessage({ data: JSON.stringify(data) });
+        var tracks = video.textTracks;
+        for (var ti = 0; ti < tracks.length; ti++) {
+          tracks[ti].mode = enabled ? 'showing' : 'hidden';
+        }
+      } else if (cmd === 'play') {
+        video.play().catch(function(){});
+      } else if (cmd === 'pause') {
+        video.pause();
       }
-    });
-    ws.onclose = function() {
-      setTimeout(connectWs, 3000);
-    };
+    } else if (data.type === 'volume') {
+      if (data.volume != null) {
+        video.volume = data.volume / 100;
+      }
+      if (data.muted != null) {
+        video.muted = data.muted;
+        if (!data.muted) {
+          document.getElementById('unmute-overlay').classList.remove('visible');
+        }
+      }
+    }
   }
+
+  // Listen for messages from parent (kiosk.html)
+  window.addEventListener('message', function(event) {
+    handleMessage(event.data);
+  });
 
   // ── Auto-return to screensaver when VOD ends ───────
   video.addEventListener('ended', function() {

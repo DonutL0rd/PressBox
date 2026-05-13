@@ -1,34 +1,25 @@
 # PressBox
 
-Self-hosted streaming appliance for your TV. Runs in Docker on an Ubuntu server connected to a TV via HDMI. Control everything from a browser on your local network.
+Self-hosted streaming appliance for your TV. Runs in a lightweight Docker container. Control everything from a web dashboard and watch on any device or a Smart TV in "Kiosk" mode.
 
 ## What It Does
 
-1. **Start the Docker container** on your server
-2. **Open the dashboard** at `http://<server-ip>:5000/` from any device
-3. **Watch MLB games** — live HLS streams with home/away feed selection, condensed game replays, pitch tracker, and batter intel overlays
-4. **Play music** — browse and queue from Navidrome/Subsonic; audio plays server-side via mpv + PulseAudio
-5. **Watch YouTube** — paste a URL or browse suggested channels; watch history with position resume
-6. **Everything plays on your TV** — video via Chrome + HLS, music via the server's audio output
+1. **Start the Docker container** on your server.
+2. **Open the dashboard** at `http://<server-ip>:5000/` from any device.
+3. **Watch on your TV** — Open `http://<server-ip>:5000/kiosk` in your TV's browser (or any tablet/screen) to turn it into a dedicated player.
+4. **Watch MLB games** — live HLS streams with home/away feed selection, condensed game replays, pitch tracker, and batter intel overlays.
+5. **Play music** — browse and queue from Navidrome/Subsonic; audio plays server-side via mpv + PulseAudio.
+6. **Watch YouTube** — paste a URL or browse suggested channels; watch history with position resume.
 
-When idle, an ambient screensaver cycles through the day's MLB schedule with scores, innings, venue, and probable pitchers. When music is playing, the layout splits: album art and track metadata on the left, schedule carousel on the right.
-
-Authentication with MLB.TV is handled entirely via API (Okta password grant) — no browser login required.
+When idle, the Kiosk displays an ambient screensaver cycling through the day's MLB schedule. When music is playing, the layout splits: album art on the left, schedule on the right.
 
 ## Quick Start
-
-### Prerequisites
-
-- Ubuntu server with HDMI connected to a TV
-- Docker & Docker Compose
-- A graphical session on the server (GDM, LightDM, or bare Xorg)
-- An MLB.TV subscription
 
 ### 1. Clone & configure
 
 ```bash
-git clone <repo-url> TV-Automator
-cd TV-Automator
+git clone <repo-url> PressBox
+cd PressBox
 cp .env.example .env
 ```
 
@@ -39,76 +30,60 @@ MLB_USERNAME=you@example.com
 MLB_PASSWORD=yourpassword
 ```
 
-### 2. Grant Docker access to the display
-
-The container needs permission to draw on the host's X display.
+### 2. Start the container
 
 ```bash
-# One-time setup
-./scripts/setup-xhost.sh
-
-# Make it permanent (survives reboots)
-sudo cp systemd/tv-automator-xhost.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now tv-automator-xhost.service
-```
-
-### 3. Start the container
-
-```bash
-cd docker
 docker compose up -d
 ```
 
-### 4. Open the dashboard
+### 3. Open the dashboard
 
-Go to `http://<server-ip>:5000/` in any browser. Click **Home** or **Away** on any live game to start streaming it on the TV.
+Go to `http://<server-ip>:5000/` in your browser.
+
+### 4. Setup the Player (Kiosk)
+
+On the device connected to your TV (or the Smart TV itself), open:
+`http://<server-ip>:5000/kiosk`
 
 ## How It Works
+
+### Remote Player (Kiosk)
+
+PressBox is designed as a "headless" backend that controls a "remote player" (the Kiosk). The Kiosk is just a web page that reacts to commands from the backend via WebSockets. This means you can run the backend on a low-power server (like a NAS or Pi) and use any browser-capable device as the screen.
 
 ### Authentication
 
 TV-Automator authenticates with MLB.TV via Okta's resource owner password grant — the same API that official MLB apps use internally. No browser-based login, no CAPTCHAs, no fragile form-filling.
 
-On startup the system:
-
-1. POSTs your credentials to `ids.mlb.com` and receives an access token
-2. Initializes a GraphQL media session at `media-gateway.mlb.com`
-3. Tokens auto-refresh before expiry; a watchdog re-authenticates if they lapse
-
 ### MLB Playback
 
-When you click a game:
-
-1. The backend queries the MLB media gateway for the game's HLS stream URL
-2. Chrome (running on the server's display) navigates to a local player page (`/player`)
-3. The player uses hls.js via a server-side HLS proxy (`/hls/`) to bypass CORS restrictions
-4. Video appears full-screen on the TV with optional pitch tracker and overlay data
-
-Condensed game replays use the public MLB Stats API CDN — no auth required.
+When you click a game in the dashboard, the backend fetches the HLS stream URL and broadcasts a "play" event. The Kiosk receives this and starts playback using `hls.js`. A server-side HLS proxy (`/hls/`) is used to bypass CORS restrictions.
 
 ### Music
 
-Music plays server-side via **mpv** + PulseAudio. The dashboard is a remote control — audio comes from the server's audio output, not the browser. Navidrome (Subsonic API) is the music source. Browse artists, albums, playlists, and internet radio; queue songs; control shuffle/repeat from any device on the network.
+Music is browsed and queued via the dashboard (Subsonic/Navidrome API). In the modern remote-first architecture, **audio plays directly in the Kiosk browser** (the TV or tablet), ensuring zero hardware dependencies on the backend server.
 
-### YouTube
+## Development
 
-Paste any YouTube URL or browse recent videos from configured channels (fetched from public RSS feeds). Chrome navigates to a local TV-optimized page (`/tv/youtube`). Watch history and playback position are saved to disk so you can resume where you left off.
+PressBox supports modern **Docker Compose Watch** for a high-velocity development loop.
 
-### Screensaver
+```bash
+# Start in watch mode
+DEBUG=true docker compose watch
+```
 
-When idle, Chrome displays an ambient screensaver (`/screensaver`) that rotates through the day's MLB schedule with 8-second crossfades between game cards. When music is playing, the layout splits to show album art alongside the schedule.
+- **Backend:** Changes to `./src` (except frontend) are synced, and the server hot-reloads via Uvicorn.
+- **Frontend:** Changes to `./src/tv_automator/web/frontend/src` trigger an automatic production build and container refresh.
+- **Dependencies:** Changes to `pyproject.toml` trigger a container rebuild.
 
-### Reliability
-
-A background watchdog monitors browser health every 30 seconds and restarts Chrome if it crashes. Streams reconnect automatically on failure (up to 3 retries). Chrome recycles itself after 8 hours of idle to prevent memory leaks.
+*Note: The original upstream Docker configuration is still available in the `docker/` directory for compatibility.*
 
 ## Architecture
 
 ```
                 Browser (laptop/phone)
                          │
-                    http://:5000
+                    http://:5000 (Dashboard)
                          │
 ┌────────────────────────┼──────────────────────────────┐
 │  Docker Container      │                              │
@@ -116,40 +91,27 @@ A background watchdog monitors browser health every 30 seconds and restarts Chro
 │  ┌─────────────────────▼───────────────────────────┐  │
 │  │  FastAPI + uvicorn (port 5000)                  │  │
 │  │                                                 │  │
-│  │  GET  /              → React SPA (Dashboard)    │  │
-│  │  GET  /api/games     → MLB schedule             │  │
-│  │  POST /api/play      → Fetch stream → navigate  │  │
-│  │  POST /api/stop      → Stop playback            │  │
-│  │  POST /api/youtube   → Play YouTube video       │  │
-│  │  GET  /api/music/*   → Music library & control  │  │
-│  │  POST /api/music/*   → Playback + queue control │  │
-│  │  GET  /player        → HLS player + overlays    │  │
-│  │  GET  /screensaver   → Ambient schedule display │  │
-│  │  GET  /tv/youtube    → TV-side YouTube player   │  │
-│  │  GET  /hls/*         → HLS proxy (CORS bypass)  │  │
-│  │  WS   /ws            → Real-time state push     │  │
-│  └──────┬──────────┬──────────┬─────────────────────┘  │
-│         │          │          │                     │
-│  ┌──────▼───────┐  │  ┌───────▼──────────────────┐ │
-│  │ MLBSession   │  │  │ BrowserController        │ │
-│  │ (Okta auth + │  │  │ (Playwright + Chrome)    │ │
-│  │  GraphQL)    │  │  └──────────┬───────────────┘ │
-│  └──────────────┘  │             │                 │
-│                    │        X11 Socket              │
-│  ┌─────────────────▼──┐    ┌────▼───┐             │
-│  │ Navidrome Client   │    │  mpv   │             │
-│  │ (Subsonic API)     │    │ + PA   │             │
-│  └────────────────────┘    └────────┘             │
-│                                                    │
-│  ┌──────────────────┐     HDMI / Audio output      │
-│  │  CECController   ├─────────────────────────┐   │
-│  │ (TV power on/off)│                         │   │
-│  └──────────────────┘                         │   │
-└───────────────────────────────────────────────┼───┘
-                                                │
-                                           ┌────▼────┐
-                                           │   TV    │
-                                           └─────────┘
+│  │  /api/*       → Business Logic                  │  │
+│  │  /hls/*       → HLS Proxy                       │  │
+│  │  /ws          → Real-time State Hub             │  │
+│  └──────┬───────────────────────┬──────────────────┘  │
+│         │                       │                     │
+│  ┌──────▼───────┐        ┌──────▼───────────┐         │
+│  │ MLBSession   │        │ Navidrome Client │         │
+│  │ (Okta Auth)  │        │ (Subsonic API)   │         │
+│  └──────────────┘        └──────────────────┘         │
+└───────────────────────────────┬───────────────────────┘
+                                │
+                                │ WebSocket / HTTP
+                                │
+                         ┌──────▼──────┐
+                         │   Kiosk     │
+                         │ (Web Player)│
+                         └──────┬──────┘
+                                │
+                           ┌────▼────┐
+                           │   TV    │
+                           └─────────┘
 ```
 
 ## Configuration
@@ -160,9 +122,7 @@ A background watchdog monitors browser health every 30 seconds and restarts Chro
 | -------------------- | -------- | ------------------------------------------------------- |
 | `MLB_USERNAME`       | Yes      | MLB.TV account email                                    |
 | `MLB_PASSWORD`       | Yes      | MLB.TV account password                                 |
-| `DISPLAY`            | No       | X display (default: `:0`)                               |
 | `DATA_DIR`           | No       | Persistent data path (default: `/data`)                 |
-| `CHROME_PATH`        | No       | Chrome binary override                                  |
 | `NAVIDROME_URL`      | No       | Navidrome server URL (e.g. `http://192.168.1.100:4533`) |
 | `NAVIDROME_USERNAME` | No       | Navidrome account username                              |
 
